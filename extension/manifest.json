@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "ContentGraph Transcript",
+  "version": "0.2.5",
+  "description": "Extract YouTube transcripts and save to ContentGraph",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://youtube.com/*",
+    "https://tm1.website/*",
+    "http://localhost:8001/*",
+    "http://127.0.0.1:8001/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/watch*"],
+      "js": ["content.js"],
+      "css": ["panel.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "ContentGraph Transcript",
+    "default_popup": "popup.html"
+  }
+}

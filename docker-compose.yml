@@ -1,0 +1,53 @@
+services:
+  postgres:
+    # pgvector-enabled Postgres for title semantic search
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: contentgraph
+      POSTGRES_PASSWORD: contentgraph
+      POSTGRES_DB: contentgraph
+    ports:
+      # 5433 avoids clash with other local Postgres on 5432
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U contentgraph -d contentgraph"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://contentgraph:contentgraph@postgres:5432/contentgraph
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3002}
+      GOOGLE_SHEETS_SPREADSHEET_ID: ${GOOGLE_SHEETS_SPREADSHEET_ID:-}
+      GOOGLE_SERVICE_ACCOUNT_FILE: /app/credentials/service_account.json
+      GOOGLE_SHEETS_RANGE: ${GOOGLE_SHEETS_RANGE:-Sheet1!A:F}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      TRANSCRIPT_HTTP_PROXY: ${TRANSCRIPT_HTTP_PROXY:-}
+      COMMENTS_MAX_PER_VIDEO: ${COMMENTS_MAX_PER_VIDEO:-25}
+      COMMENTS_ENRICH_LIMIT: ${COMMENTS_ENRICH_LIMIT:-15}
+    volumes:
+      - ./backend/credentials:/app/credentials:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001/api/v1}
+    ports:
+      - "3002:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

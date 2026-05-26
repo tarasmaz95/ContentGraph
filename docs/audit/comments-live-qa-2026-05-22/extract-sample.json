@@ -1,0 +1,15 @@
+{
+  "threads": 40,
+  "extracted": 20,
+  "selectorHits": { "author": 20, "text": 20, "likes": 20 },
+  "meta": {
+    "video_url": "https://www.youtube.com/watch?v=u321m25rKXc",
+    "title": "Volodymyr Zelenskyy: Ukraine, War, Peace, Putin, Trump, NATO, and Freedom | Lex Fridman Podcast #456",
+    "creator": "Lex Fridman"
+  },
+  "top_sample": [
+    { "author": "@craigrussell3062", "likes": 39000 },
+    { "author": "@tweedyharfunkel", "likes": 36000 },
+    { "author": "@DaveNealComedian", "likes": 24000 }
+  ]
+}

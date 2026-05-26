@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Env & secrets
+.env
+.env.local
+backend/credentials/*.json
+!backend/credentials/.gitkeep
+service_account.json
+
+# Build
+.next/
+out/
+dist/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
+
+# Docker
+postgres_data/

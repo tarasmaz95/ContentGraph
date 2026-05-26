@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>ContentGraph Extension Options</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 480px;
+        margin: 24px;
+      }
+      label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 600;
+      }
+      input {
+        width: 100%;
+        padding: 8px;
+        box-sizing: border-box;
+      }
+      button {
+        margin-top: 12px;
+        padding: 8px 16px;
+      }
+      #status {
+        margin-top: 12px;
+        color: #137333;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>ContentGraph</h1>
+    <p>API base URL for saving transcripts (no trailing slash).</p>
+    <label for="apiBase">API base</label>
+    <input id="apiBase" type="url" placeholder="https://tm1.website/api/v1" />
+    <label for="extensionApiKey" style="margin-top: 16px">Extension API key (optional)</label>
+    <input
+      id="extensionApiKey"
+      type="password"
+      placeholder="Set only if server requires X-Extension-Key"
+      autocomplete="off"
+    />
+    <button id="save">Save</button>
+    <p id="status"></p>
+    <script src="options.js"></script>
+  </body>
+</html>
