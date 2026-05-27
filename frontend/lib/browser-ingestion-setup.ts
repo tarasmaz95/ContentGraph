@@ -1,6 +1,6 @@
 /** Setup constants for browser ingestion operator UX. */
 
-export const WORKER_ZIP_URL = "/downloads/contentgraph-browser-worker.zip";
+export { WORKER_ZIP_PATH as WORKER_ZIP_URL } from "@/lib/worker-download";
 export const EXTENSION_PAGE_URL = "/extension";
 export const CHROME_EXTENSIONS_URL = "chrome://extensions";
 
@@ -18,15 +18,13 @@ export function getApiBaseUrl(): string {
 export const SETUP_COMMANDS_UNIX = `cd worker
 npm install
 npx playwright install chromium
-cp .env.example .env
-# Edit .env — paste your Worker Token
+# Edit .env — paste WORKER_TOKEN from dashboard (daily limit already 0)
 npm start`;
 
 export const SETUP_COMMANDS_WINDOWS = `cd worker
 npm install
 npx playwright install chromium
-copy .env.example .env
-REM Edit .env — paste your Worker Token
+REM Edit .env — paste WORKER_TOKEN from dashboard (daily limit already 0)
 npm start`;
 
 export const NPM_INSTALL_ONE_LINER = "cd worker && npm install && npx playwright install chromium";

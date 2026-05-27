@@ -19,6 +19,7 @@ import { BrowserJobsTablePanel } from "@/components/browser-ingestion/jobs-table
 import { BrowserRunProgressPanel } from "@/components/browser-ingestion/run-progress-panel";
 import { SetupWizard } from "@/components/browser-ingestion/setup-wizard";
 import { WorkerCtaBanner } from "@/components/browser-ingestion/worker-cta-banner";
+import { WorkerFleetPanel } from "@/components/browser-ingestion/worker-fleet-panel";
 import { WorkerLiveStatus } from "@/components/browser-ingestion/worker-live-status";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,7 +30,7 @@ import {
   getStoredBrowserIngestionRunId,
   setStoredBrowserIngestionRunId,
 } from "@/lib/browser-ingestion-storage";
-import { WORKER_ZIP_URL } from "@/lib/browser-ingestion-setup";
+import { WORKER_ZIP_PATH, fetchWorkerBundleMeta } from "@/lib/worker-download";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
@@ -65,9 +66,18 @@ export function BrowserIngestionPage() {
   const [creatorFilter, setCreatorFilter] = useState("");
   const [latestOnly, setLatestOnly] = useState(false);
   const [onlyMissing, setOnlyMissing] = useState(true);
+  const [workerBundleVersion, setWorkerBundleVersion] = useState<string | null>(null);
 
   const worker = dashboard?.worker ?? null;
+  const workers = dashboard?.workers ?? (worker ? [worker] : []);
+  const hasMultipleWorkers = workers.length > 1;
   const workerOnline = isWorkerConnected(worker);
+
+  useEffect(() => {
+    void fetchWorkerBundleMeta().then((meta) => {
+      if (meta?.version) setWorkerBundleVersion(meta.version);
+    });
+  }, []);
 
   useEffect(() => {
     if (!workerOnline) return;
@@ -300,12 +310,16 @@ export function BrowserIngestionPage() {
         actions={
           <div className="flex flex-wrap gap-2">
             <a
-              href={WORKER_ZIP_URL}
-              download
+              href={WORKER_ZIP_PATH}
+              download="contentgraph-browser-worker.zip"
               className="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent"
             >
               <Download className="mr-2 h-4 w-4" />
-              {t("browserIngestion.downloadWorker")}
+              {workerBundleVersion
+                ? t("browserIngestion.downloadWorkerVersion", {
+                    version: workerBundleVersion,
+                  })
+                : t("browserIngestion.downloadWorker")}
             </a>
             <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
               <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
@@ -324,6 +338,13 @@ export function BrowserIngestionPage() {
       <WorkerCtaBanner worker={worker} onScrollToSetup={scrollToSetup} />
 
       <WorkerLiveStatus worker={worker} sticky={false} onResetCooldown={handleResetCooldown} />
+
+      {hasMultipleWorkers && (
+        <WorkerFleetPanel
+          workers={workers}
+          activeRunId={dashboard?.active_run_id ?? null}
+        />
+      )}
 
       <div className="flex flex-wrap gap-3 text-sm">
         <Link href="/transcripts/api-ingestion" className="text-primary hover:underline">

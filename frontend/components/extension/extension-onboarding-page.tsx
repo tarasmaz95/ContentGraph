@@ -162,6 +162,9 @@ export function ExtensionOnboardingPage() {
               <li>{t("extension.releaseB5")}</li>
               <li>{t("extension.releaseB6")}</li>
               <li>{t("extension.releaseB7")}</li>
+              <li>{t("extension.releaseB8")}</li>
+              <li>{t("extension.releaseB9")}</li>
+              <li>{t("extension.releaseB10")}</li>
             </ul>
           </CardContent>
         </Card>

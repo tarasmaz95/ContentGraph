@@ -70,13 +70,17 @@ export function WorkerStatusPanel({ worker }: { worker: BrowserIngestionWorker |
         <p className="mt-3 text-sm text-muted-foreground">{t("browserIngestion.workerNone")}</p>
       ) : (
         <>
-          {(worker.daily_limit_reached ||
+          {((worker.max_jobs_per_day != null &&
+            worker.max_jobs_per_day > 0 &&
+            worker.daily_limit_reached) ||
             worker.health_status === "incompatible_extension" ||
             worker.restart_recommended) && (
             <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <div className="space-y-1">
-                {worker.daily_limit_reached && (
+                {worker.max_jobs_per_day != null &&
+                  worker.max_jobs_per_day > 0 &&
+                  worker.daily_limit_reached && (
                   <p>{t("browserIngestion.dailyLimitReached")}</p>
                 )}
                 {worker.health_status === "incompatible_extension" && (
@@ -109,12 +113,8 @@ export function WorkerStatusPanel({ worker }: { worker: BrowserIngestionWorker |
               value={formatUptime(worker.uptime_seconds)}
             />
             <Stat
-              label={t("browserIngestion.dailyProgress")}
-              value={
-                worker.max_jobs_per_day
-                  ? `${worker.processed_today} / ${worker.max_jobs_per_day}`
-                  : String(worker.processed_today)
-              }
+              label={t("browserIngestion.jobsProcessedToday")}
+              value={String(worker.processed_today)}
             />
             <Stat
               label={t("browserIngestion.workerThroughput")}

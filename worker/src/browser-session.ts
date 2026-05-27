@@ -1,5 +1,6 @@
 import path from "node:path";
 import { chromium, type BrowserContext, type Page, type ServiceWorker } from "playwright";
+import { applyCookiesFile } from "./cookies.js";
 import { config } from "./config.js";
 import { log } from "./logger.js";
 
@@ -13,6 +14,11 @@ export function getJobsSinceRestart(): number {
 function isExtensionServiceWorker(worker: ServiceWorker): boolean {
   return worker.url().startsWith("chrome-extension://");
 }
+
+export type LaunchBrowserOptions = {
+  /** Override BROWSER_CHANNEL (e.g. `chrome` for Google sign-in). */
+  channel?: string;
+};
 
 async function waitForExtensionServiceWorker(ctx: BrowserContext): Promise<void> {
   const existing = ctx.serviceWorkers().find(isExtensionServiceWorker);
@@ -34,28 +40,40 @@ async function waitForExtensionServiceWorker(ctx: BrowserContext): Promise<void>
   }
 }
 
-export async function launchBrowser(): Promise<BrowserContext> {
+export async function launchBrowser(opts?: LaunchBrowserOptions): Promise<BrowserContext> {
   if (context) {
     return context;
   }
   const extPath = path.resolve(config.extensionPath);
+  const channel = opts?.channel || config.browserChannel;
   log.info("launching browser", {
-    channel: config.browserChannel,
+    channel,
     profile: config.chromeUserDataDir,
     extension_path: extPath,
   });
+  // YouTube often blocks transcript loading in automated browsers.
   context = await chromium.launchPersistentContext(config.chromeUserDataDir, {
-    channel: config.browserChannel,
+    channel,
     headless: false,
     slowMo: 30,
+    ignoreDefaultArgs: ["--enable-automation"],
     viewport: { width: 1280, height: 900 },
+    locale: "en-US",
     args: [
       `--disable-extensions-except=${extPath}`,
       `--load-extension=${extPath}`,
       "--no-first-run",
       "--no-default-browser-check",
+      "--disable-blink-features=AutomationControlled",
     ],
   });
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", {
+      get: () => false,
+      configurable: true,
+    });
+  });
+  await applyCookiesFile((cookies) => context!.addCookies(cookies), config.cookiesFile);
   await waitForExtensionServiceWorker(context);
   jobsSinceRestart = 0;
   return context;
@@ -73,8 +91,8 @@ async function cleanupExtraTabs(ctx: BrowserContext, keep: Page): Promise<void> 
   }
 }
 
-export async function getPage(): Promise<Page> {
-  const ctx = await launchBrowser();
+export async function getPage(opts?: LaunchBrowserOptions): Promise<Page> {
+  const ctx = await launchBrowser(opts);
   const pages = ctx.pages().filter((p) => !p.isClosed());
   const page = pages.length > 0 ? pages[0]! : await ctx.newPage();
   await cleanupExtraTabs(ctx, page);

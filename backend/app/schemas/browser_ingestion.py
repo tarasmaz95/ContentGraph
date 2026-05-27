@@ -112,12 +112,16 @@ class BrowserIngestionWorkerRead(BaseModel):
     processed_per_hour: float | None = None
     health_status: str = "unknown"
     clear_local_cooldown: bool = False
+    jobs_in_run_success: int = 0
+    jobs_in_run_failed: int = 0
+    jobs_in_run_processing: int = 0
 
     model_config = {"from_attributes": True}
 
 
 class BrowserIngestionDashboard(BaseModel):
     worker: BrowserIngestionWorkerRead | None
+    workers: list[BrowserIngestionWorkerRead] = Field(default_factory=list)
     active_run_id: int | None
     run: BrowserIngestionRunRead | None
     catalog_videos_total: int = 0

@@ -411,11 +411,45 @@ class BrowserIngestionService:
             or 0
         )
 
-        worker = await self._get_online_worker()
-        worker_read = self._worker_read(worker) if worker else None
-
         active = await self._get_active_run()
         rid = run_id or (active.id if active else None)
+
+        workers_list = await self._list_dashboard_workers()
+        per_worker_run_stats: dict[int, dict[str, int]] = {}
+        if rid:
+            result = await self._db.execute(
+                select(
+                    BrowserIngestionJob.worker_id,
+                    BrowserIngestionJob.status,
+                    func.count().label("n"),
+                )
+                .where(
+                    BrowserIngestionJob.run_id == rid,
+                    BrowserIngestionJob.worker_id.isnot(None),
+                )
+                .group_by(BrowserIngestionJob.worker_id, BrowserIngestionJob.status)
+            )
+            for row in result.all():
+                bucket = per_worker_run_stats.setdefault(int(row.worker_id), {})
+                bucket[row.status] = int(row.n)
+
+        worker_reads: list[BrowserIngestionWorkerRead] = []
+        for w in workers_list:
+            read = self._worker_read(w)
+            stats = per_worker_run_stats.get(w.id, {})
+            read = read.model_copy(
+                update={
+                    "jobs_in_run_success": int(stats.get("success", 0)),
+                    "jobs_in_run_failed": int(stats.get("failed", 0)),
+                    "jobs_in_run_processing": int(stats.get("processing", 0)),
+                }
+            )
+            worker_reads.append(read)
+
+        primary_worker = next((w for w in worker_reads if w.status != "offline"), None)
+        if primary_worker is None and worker_reads:
+            primary_worker = worker_reads[0]
+
         run_read = None
         if rid:
             run = await self.get_run(rid)
@@ -423,7 +457,8 @@ class BrowserIngestionService:
                 run_read = await self.to_run_read(run, include_jobs=False)
 
         return BrowserIngestionDashboard(
-            worker=worker_read,
+            worker=primary_worker,
+            workers=worker_reads,
             active_run_id=active.id if active else None,
             run=run_read,
             catalog_videos_total=total,
@@ -462,6 +497,28 @@ class BrowserIngestionService:
             job.claimed_at = None
             job.error_message = "Requeued — worker offline"
             job.updated_at = now
+
+    async def _list_dashboard_workers(self) -> list[BrowserIngestionWorker]:
+        """All workers that ever sent a heartbeat, online ones first.
+
+        Offline workers are included so the dashboard can show the full fleet
+        (last-seen, last activity). _mark_workers_offline() is already called
+        before this; offline ones simply have status == "offline" here.
+        """
+        now = datetime.now(timezone.utc)
+        cutoff_recent = now - timedelta(hours=24)
+        result = await self._db.execute(
+            select(BrowserIngestionWorker)
+            .where(
+                (BrowserIngestionWorker.status != "offline")
+                | (BrowserIngestionWorker.last_heartbeat_at >= cutoff_recent)
+            )
+            .order_by(
+                BrowserIngestionWorker.status == "offline",
+                BrowserIngestionWorker.last_heartbeat_at.desc().nullslast(),
+            )
+        )
+        return list(result.scalars().all())
 
     async def _get_online_worker(self) -> BrowserIngestionWorker | None:
         result = await self._db.execute(
@@ -647,12 +704,28 @@ class BrowserIngestionService:
 
     def _worker_read(self, worker: BrowserIngestionWorker) -> BrowserIngestionWorkerRead:
         stats = worker.stats_json or {}
+        raw_max = stats.get("max_jobs_per_day")
+        max_jobs_per_day: int | None
+        try:
+            max_jobs_per_day = int(raw_max) if raw_max is not None else None
+        except (TypeError, ValueError):
+            max_jobs_per_day = None
+        if max_jobs_per_day is not None and max_jobs_per_day <= 0:
+            max_jobs_per_day = 0
+        daily_limit_reached = bool(stats.get("daily_limit_reached"))
+        if not max_jobs_per_day or max_jobs_per_day <= 0:
+            daily_limit_reached = False
+
         health = "healthy"
         if worker.status == "offline":
             health = "offline"
         elif worker.status == "incompatible_extension":
             health = "incompatible_extension"
-        elif worker.status == "daily_limit" or stats.get("daily_limit_reached"):
+        elif (
+            max_jobs_per_day
+            and max_jobs_per_day > 0
+            and (worker.status == "daily_limit" or daily_limit_reached)
+        ):
             health = "daily_limit"
         elif worker.status == "cooldown":
             health = "cooldown"
@@ -693,8 +766,8 @@ class BrowserIngestionService:
             failed_today=int(stats.get("failed_today", 0)),
             jobs_per_min=stats.get("jobs_per_min"),
             consecutive_failures=int(stats.get("consecutive_failures", 0)),
-            max_jobs_per_day=stats.get("max_jobs_per_day"),
-            daily_limit_reached=bool(stats.get("daily_limit_reached")),
+            max_jobs_per_day=max_jobs_per_day,
+            daily_limit_reached=daily_limit_reached,
             cooldown_until=cooldown_until,
             extension_version=stats.get("extension_version"),
             required_extension_version=stats.get("required_extension_version"),

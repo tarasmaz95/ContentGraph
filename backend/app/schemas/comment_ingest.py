@@ -5,7 +5,8 @@ from pydantic import BaseModel, Field
 
 class CommentIngestItem(BaseModel):
     author: str = Field(default="", max_length=255)
-    text: str = Field(..., min_length=2, max_length=4000)
+    # No max_length — long comments; DB column is Text.
+    text: str = Field(..., min_length=2)
     likes: int = Field(default=0, ge=0)
 
 

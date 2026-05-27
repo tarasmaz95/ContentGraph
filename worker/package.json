@@ -1,10 +1,11 @@
 {
   "name": "contentgraph-browser-worker",
-  "version": "0.1.0",
+  "version": "0.2.6",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts",
+    "browser": "tsx src/open-browser.ts",
     "reset-cooldown": "node scripts/reset-cooldown.mjs",
     "build": "tsc",
     "typecheck": "tsc --noEmit"

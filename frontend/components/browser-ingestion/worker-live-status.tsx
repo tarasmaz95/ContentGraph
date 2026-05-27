@@ -55,10 +55,12 @@ export function WorkerLiveStatus({
   const processing =
     worker && isWorkerProcessing(worker.current_phase, worker.current_action);
 
-  const dailyPct =
-    worker?.max_jobs_per_day && worker.max_jobs_per_day > 0
-      ? Math.min(100, (worker.processed_today / worker.max_jobs_per_day) * 100)
-      : null;
+  /** Only show daily-cap UI while worker is live — offline rows keep stale heartbeat stats. */
+  const showDailyCap =
+    connected &&
+    worker != null &&
+    worker.max_jobs_per_day != null &&
+    worker.max_jobs_per_day > 0;
 
   return (
     <section
@@ -85,7 +87,11 @@ export function WorkerLiveStatus({
                 ? t("browserIngestion.statusConnected")
                 : t("browserIngestion.statusDisconnected")}
             </Badge>
-            {worker && (
+            {worker &&
+              !(
+                worker.health_status === "daily_limit" &&
+                (!worker.max_jobs_per_day || worker.max_jobs_per_day <= 0)
+              ) && (
               <Badge variant={healthVariant(worker.health_status)}>
                 {friendlyHealth(worker.health_status, t)}
               </Badge>
@@ -109,14 +115,16 @@ export function WorkerLiveStatus({
 
       {worker && (
         <div className="space-y-4 p-5">
-          {(worker.daily_limit_reached ||
-            worker.health_status === "incompatible_extension" ||
+          {(worker.health_status === "incompatible_extension" ||
             worker.health_status === "cooldown" ||
-            worker.restart_recommended) && (
+            worker.restart_recommended ||
+            (showDailyCap && worker.daily_limit_reached)) && (
             <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
               <div className="space-y-1">
-                {worker.daily_limit_reached && <p>{t("browserIngestion.dailyLimitReached")}</p>}
+                {showDailyCap && worker.daily_limit_reached && (
+                  <p>{t("browserIngestion.dailyLimitReached")}</p>
+                )}
                 {worker.health_status === "cooldown" && (
                   <div className="space-y-2">
                     <p>
@@ -169,7 +177,18 @@ export function WorkerLiveStatus({
             </div>
           )}
 
-          {dailyPct != null && (
+          <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-3">
+            <p className="text-xs text-muted-foreground">
+              {t("browserIngestion.jobsProcessedToday")}
+            </p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">{worker.processed_today}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {t("browserIngestion.workerToday")}: {worker.success_today} ✓ /{" "}
+              {worker.failed_today} ✗
+            </p>
+          </div>
+
+          {showDailyCap && worker.max_jobs_per_day != null && (
             <div>
               <div className="mb-1 flex justify-between text-xs text-muted-foreground">
                 <span>{t("browserIngestion.dailyProgress")}</span>
@@ -181,9 +200,14 @@ export function WorkerLiveStatus({
                 <div
                   className={cn(
                     "h-full rounded-full transition-all duration-500",
-                    dailyPct >= 100 ? "bg-amber-500" : "bg-primary",
+                    worker.daily_limit_reached ? "bg-amber-500" : "bg-primary",
                   )}
-                  style={{ width: `${dailyPct}%` }}
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      (worker.processed_today / worker.max_jobs_per_day) * 100,
+                    )}%`,
+                  }}
                 />
               </div>
             </div>

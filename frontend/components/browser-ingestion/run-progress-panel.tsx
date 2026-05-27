@@ -31,12 +31,13 @@ export function BrowserRunProgressPanel({
   const active = isBrowserIngestionRunActive(run);
   const terminal = isBrowserIngestionRunTerminal(run);
   const blockedWorker =
-    active &&
-    worker &&
-    ["cooldown", "daily_limit", "incompatible_extension", "offline"].includes(
-      worker.health_status,
-    )
-      ? worker
+    active && worker
+      ? ["cooldown", "incompatible_extension", "offline"].includes(worker.health_status) ||
+        (worker.health_status === "daily_limit" &&
+          worker.max_jobs_per_day != null &&
+          worker.max_jobs_per_day > 0)
+        ? worker
+        : null
       : null;
 
   return (

@@ -36,6 +36,16 @@ Configure extension in the worker's Chromium window (loaded automatically):
 
 The worker defaults to `BROWSER_CHANNEL=chromium`. On macOS, system Google Chrome can fail to inject MV3 content scripts when launched with `--load-extension`, which makes the worker report `extension incompatible` even when `extension/` is correct.
 
+### Transcript spins forever (works in normal Chrome)
+
+YouTube often blocks transcript loading in automated browsers. The worker mitigates this (`--enable-automation` removed, `AutomationControlled` disabled).
+
+1. `npm run browser` — opens **Google Chrome** (not Chromium) for sign-in; press Ctrl+C when done.
+2. Sign in via **YouTube** (avatar → Sign in). Google often blocks login in automated Chromium with *"This browser or app may not be secure"*.
+3. Confirm **Transcript** works on a video in that window, then run `npm start`.
+
+**If Google still blocks sign-in:** export cookies from your normal Chrome while logged into YouTube (extension [Cookie-Editor](https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm) → Export → JSON), save as `~/.contentgraph-worker/state/cookies.json`, run `npm start` again.
+
 ## Run
 
 1. On tm1: open `/browser-ingestion` → **Enqueue videos**
@@ -47,7 +57,7 @@ npm start
 
 ## Safety limits (.env)
 
-- `BROWSER_INGESTION_MAX_JOBS_PER_DAY` — stop claiming after N jobs (default 200)
+- `BROWSER_INGESTION_MAX_JOBS_PER_DAY` — stop claiming after N jobs per day (`0` = unlimited, default)
 - `BROWSER_INGESTION_MAX_CONSECUTIVE_FAILURES` — cooldown after N failures (default 5)
 - `BROWSER_INGESTION_COOLDOWN_MINUTES` — pause duration (default 30)
 - `BROWSER_CHANNEL` — browser channel for Playwright (default `chromium`)

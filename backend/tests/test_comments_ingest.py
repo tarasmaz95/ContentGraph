@@ -29,6 +29,21 @@ def test_comments_ingest_rejects_empty_list(api_v1: httpx.Client) -> None:
     assert response.status_code == 422
 
 
+def test_comments_ingest_accepts_long_comment_text(api_v1: httpx.Client) -> None:
+    long_text = "word " * 2500
+    response = api_v1.post(
+        "/comments/ingest",
+        json={
+            "video_url": "https://www.youtube.com/watch?v=zzzzzzzzzzz",
+            "title": "__nonexistent_title_xyz__",
+            "creator": "__nonexistent_creator_xyz__",
+            "comments": [{"author": "User", "text": long_text, "likes": 1}],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["matched"] is False
+
+
 def test_comments_ingest_no_match(api_v1: httpx.Client) -> None:
     response = api_v1.post(
         "/comments/ingest",

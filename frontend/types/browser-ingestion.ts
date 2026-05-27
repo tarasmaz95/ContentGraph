@@ -107,6 +107,9 @@ export interface BrowserIngestionWorker {
   restart_recommended: boolean;
   processed_per_hour: number | null;
   health_status: WorkerHealthStatus;
+  jobs_in_run_success?: number;
+  jobs_in_run_failed?: number;
+  jobs_in_run_processing?: number;
 }
 
 export interface BrowserIngestionRun {
@@ -128,6 +131,7 @@ export interface BrowserIngestionRun {
 
 export interface BrowserIngestionDashboard {
   worker: BrowserIngestionWorker | null;
+  workers?: BrowserIngestionWorker[];
   active_run_id: number | null;
   run: BrowserIngestionRun | null;
   catalog_videos_total: number;
@@ -169,5 +173,10 @@ export function isWorkerConnected(worker: BrowserIngestionWorker | null | undefi
 
 export function isWorkerHealthy(worker: BrowserIngestionWorker | null | undefined): boolean {
   if (!worker) return false;
+  const dailyCapped =
+    worker.max_jobs_per_day != null &&
+    worker.max_jobs_per_day > 0 &&
+    (worker.health_status === "daily_limit" || worker.daily_limit_reached);
+  if (dailyCapped) return false;
   return worker.health_status === "healthy" || worker.status === "online";
 }

@@ -49,6 +49,8 @@ export function categorizeFailure(message: string): FailureCategory {
   if (
     m.includes("comments are turned off") ||
     m.includes("comments disabled") ||
+    m.includes("comments unavailable") ||
+    m.includes("no comments found") ||
     m.includes("no comments")
   ) {
     return "comments_disabled";

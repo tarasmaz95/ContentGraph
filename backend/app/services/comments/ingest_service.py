@@ -48,7 +48,7 @@ class CommentsIngestService:
             seen.add(text.lower())
             cleaned.append(
                 {
-                    "text": text[:4000],
+                    "text": text,
                     "author": (item.author or "").strip()[:255],
                     "likes": int(item.likes or 0),
                 }

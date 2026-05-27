@@ -92,6 +92,7 @@ async function waitStatusOk(
       const text = (el.textContent || "").toLowerCase();
       const err = el.classList.contains("cg-error");
       if (err && text.includes("no transcript")) return true;
+      if (err && text.includes("no comments")) return true;
       if (err && text.includes("unavailable")) return true;
       const ok = el.classList.contains("cg-ok") || el.classList.contains("cg-warn");
       return ok && text.includes(needle.toLowerCase());
@@ -103,6 +104,9 @@ async function waitStatusOk(
   const lower = statusText.toLowerCase();
   if (lower.includes("no transcript") || lower.includes("transcript unavailable")) {
     throw new Error("Transcript unavailable for this video");
+  }
+  if (lower.includes("no comments found") || lower.includes("comments unavailable")) {
+    throw new Error("Comments unavailable for this video");
   }
   return statusText;
 }

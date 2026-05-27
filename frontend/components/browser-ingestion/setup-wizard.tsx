@@ -29,8 +29,14 @@ import {
   NPM_START_ONE_LINER,
   SETUP_COMMANDS_UNIX,
   SETUP_COMMANDS_WINDOWS,
-  WORKER_ZIP_URL,
 } from "@/lib/browser-ingestion-setup";
+import {
+  WORKER_ZIP_PATH,
+  fetchWorkerBundleMeta,
+  formatBytes,
+  formatMetaDate,
+  type WorkerBundleMeta,
+} from "@/lib/worker-download";
 import {
   getStoredExtensionKey,
   getStoredWorkerToken,
@@ -55,7 +61,12 @@ export function SetupWizard({ workerOnline }: { workerOnline: boolean }) {
   const [extensionKey, setExtensionKey] = useState("");
   const [workerToken, setWorkerToken] = useState("");
   const [registering, setRegistering] = useState(false);
+  const [workerMeta, setWorkerMeta] = useState<WorkerBundleMeta | null>(null);
   const apiUrl = getApiBaseUrl();
+
+  useEffect(() => {
+    void fetchWorkerBundleMeta().then(setWorkerMeta);
+  }, []);
 
   const refresh = useCallback(() => {
     const p = getWizardProgress();
@@ -102,21 +113,49 @@ export function SetupWizard({ workerOnline }: { workerOnline: boolean }) {
     }
   };
 
+  const bundleVersion = workerMeta?.version ?? "0.2.6";
+
   const steps = [
     {
       n: 1,
-      title: t("browserIngestion.wizard.step1Title"),
-      desc: t("browserIngestion.wizard.step1Desc"),
+      title: workerMeta
+        ? t("browserIngestion.wizard.step1TitleVersion", { version: bundleVersion })
+        : t("browserIngestion.wizard.step1Title"),
+      desc: t("browserIngestion.wizard.step1Desc", { version: bundleVersion }),
       body: (
         <div className="space-y-3">
+          {workerMeta && (
+            <dl className="grid grid-cols-3 gap-2 text-sm">
+              <div>
+                <dt className="text-xs text-muted-foreground">
+                  {t("browserIngestion.wizard.bundleVersion")}
+                </dt>
+                <dd className="font-mono font-medium">{workerMeta.version}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">
+                  {t("browserIngestion.wizard.bundleUpdated")}
+                </dt>
+                <dd className="text-xs">{formatMetaDate(workerMeta.updatedAt)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">
+                  {t("browserIngestion.wizard.bundleSize")}
+                </dt>
+                <dd>{formatBytes(workerMeta.sizeBytes)}</dd>
+              </div>
+            </dl>
+          )}
           <a
-            href={WORKER_ZIP_URL}
-            download
+            href={WORKER_ZIP_PATH}
+            download={workerMeta?.filename ?? "contentgraph-browser-worker.zip"}
             onClick={() => markWizardStep(1)}
             className="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
           >
             <Download className="mr-2 h-4 w-4" />
-            {t("browserIngestion.wizard.downloadZip")}
+            {workerMeta
+              ? t("browserIngestion.wizard.downloadZipVersion", { version: bundleVersion })
+              : t("browserIngestion.wizard.downloadZip")}
           </a>
           <p className="text-xs text-muted-foreground">{t("browserIngestion.wizard.step1Hint")}</p>
         </div>

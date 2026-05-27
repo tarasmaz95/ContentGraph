@@ -20,6 +20,15 @@ export const config = {
   ),
   workerToken: (process.env.WORKER_TOKEN || "").trim(),
   browserChannel: (process.env.BROWSER_CHANNEL || "chromium").trim() || undefined,
+  /** Real Google Chrome — required for Google sign-in (Chromium is blocked as "not secure"). */
+  loginBrowserChannel: (process.env.LOGIN_BROWSER_CHANNEL || "chrome").trim() || undefined,
+  cookiesFile: resolvePath(
+    process.env.COOKIES_FILE ||
+      path.join(
+        resolvePath(process.env.WORKER_STATE_DIR || "~/.contentgraph-worker/state"),
+        "cookies.json",
+      ),
+  ),
   extensionPath: resolvePath(
     process.env.EXTENSION_PATH || path.join(__dirname, "../../extension"),
   ),
@@ -36,12 +45,13 @@ export const config = {
   navigationTimeoutMs: num("NAVIGATION_TIMEOUT_MS", 90000),
   stuckPageMs: num("STUCK_PAGE_MS", 180000),
   screenshotDir: resolvePath(process.env.SCREENSHOT_DIR || "./screenshots"),
-  maxJobsPerDay: num("BROWSER_INGESTION_MAX_JOBS_PER_DAY", 200),
+  /** 0 = unlimited (no daily cap). */
+  maxJobsPerDay: num("BROWSER_INGESTION_MAX_JOBS_PER_DAY", 0),
   maxConsecutiveFailures: num("BROWSER_INGESTION_MAX_CONSECUTIVE_FAILURES", 5),
   cooldownMinutes: num("BROWSER_INGESTION_COOLDOWN_MINUTES", 30),
   restartBrowserEveryJobs: num("RESTART_BROWSER_EVERY_JOBS", 20),
   requiredExtensionVersion: (
-    process.env.REQUIRED_EXTENSION_VERSION || "0.2.5"
+    process.env.REQUIRED_EXTENSION_VERSION || "0.2.6"
   ).trim(),
   phaseRetries: num("PHASE_RETRIES", 2),
 };

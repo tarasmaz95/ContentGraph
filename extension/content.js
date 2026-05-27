@@ -933,6 +933,8 @@
   const COMMENTS_SCROLL_PAUSE_MS = 450;
   const COMMENTS_SORT_WAIT_MS = 1200;
   const COMMENTS_LOAD_BUDGET_MS = 5500;
+  const COMMENTS_WAIT_MS = 10000;
+  const COMMENTS_POLL_MS = 350;
 
   async function scrollToComments() {
     const section =
@@ -1085,6 +1087,51 @@
       return;
     }
     window.scrollBy(0, 420);
+  }
+
+  /**
+   * Poll DOM for comment threads (like extractTranscriptWithRetry).
+   * Assumes scroll + Top sort already ran.
+   */
+  async function extractCommentsWithRetry(onStatus) {
+    const started = Date.now();
+    let attempt = 0;
+
+    while (Date.now() - started < COMMENTS_WAIT_MS) {
+      attempt += 1;
+      await loadVisibleCommentsPool();
+      const pool = scrapeCommentsPool(COMMENTS_POOL_MAX);
+      const selected = selectTopComments(pool, COMMENTS_FINAL_MAX);
+
+      cgLog(`comments attempt ${attempt}:`, { pool: pool.length, selected: selected.length });
+
+      if (selected.length > 0) {
+        return { comments: selected, attempt, lazyLoaded: attempt > 1 };
+      }
+
+      const threads = document.querySelectorAll("ytd-comment-thread-renderer").length;
+      if (threads > 0 && pool.length === 0) {
+        onStatus?.(
+          `Waiting for comment text… (${Math.round((Date.now() - started) / 1000)}s)`
+        );
+      } else if (threads === 0) {
+        onStatus?.(
+          `Waiting for comment threads… (${Math.round((Date.now() - started) / 1000)}s)`
+        );
+      } else if (attempt > 1) {
+        onStatus?.(`Retrying comments extraction… (${attempt})`);
+      }
+
+      await scrollCommentsStep();
+      await sleep(COMMENTS_POLL_MS);
+    }
+
+    const pool = scrapeCommentsPool(COMMENTS_POOL_MAX);
+    return {
+      comments: selectTopComments(pool, COMMENTS_FINAL_MAX),
+      attempt: attempt + 1,
+      lazyLoaded: attempt > 0,
+    };
   }
 
   /** Gradual scroll to load more threads; bounded time/steps. */
@@ -1275,16 +1322,21 @@
   async function handleExtractComments() {
     setStatus("comments", "Scrolling to comments…");
     setMeta();
+    let commentsLazyLoaded = false;
     try {
       await scrollToComments();
       setStatus("comments", "Sorting Top comments…");
       await ensureCommentsTopSort();
       setStatus("comments", "Loading comment threads…");
-      await loadVisibleCommentsPool();
-      const pool = scrapeCommentsPool(COMMENTS_POOL_MAX);
-      cgLog("comments_collected", { pool: pool.length });
-      commentsData = selectTopComments(pool, COMMENTS_FINAL_MAX);
+
+      const { comments, attempt, lazyLoaded } = await extractCommentsWithRetry((msg) =>
+        setStatus("comments", msg)
+      );
+      commentsData = comments;
+      commentsLazyLoaded = lazyLoaded;
       cgLog("comments_final_selected", {
+        attempt,
+        lazyLoaded,
         final: commentsData.length,
         topLikes: commentsData[0]?.likes ?? 0,
       });
@@ -1316,9 +1368,10 @@
       .map((c, i) => `${i + 1}. [${c.likes}] ${c.author}: ${c.text.slice(0, 120)}`)
       .join("\n");
     enableCommentActions(true);
+    const lazyNote = commentsLazyLoaded ? " (lazy-loaded)" : "";
     setStatus(
       "comments",
-      `${commentsData.length} top comments (by likes) extracted`,
+      `${commentsData.length} top comments (by likes) extracted${lazyNote}`,
       "ok"
     );
   }
