@@ -6,6 +6,46 @@ import type { JobWatchdog } from "./watchdog.js";
 
 const PANEL = "#cg-transcript-panel";
 
+export type TranscriptOutcome = "ok" | "unavailable" | "failed" | "skipped";
+export type CommentsOutcome = "ok" | "disabled" | "empty" | "failed" | "skipped";
+
+export interface TranscriptPhaseResult {
+  outcome: Exclude<TranscriptOutcome, "failed" | "skipped">;
+  status_text?: string;
+  sheets_status?: string;
+}
+
+export interface CommentsPhaseResult {
+  outcome: Exclude<CommentsOutcome, "failed" | "skipped">;
+  status_text?: string;
+  sheets_status?: string;
+}
+
+/**
+ * Page-level signals that do not warrant a hard throw — comments-fade only.
+ * Stored on the page object during navigation and consumed by the comments phase.
+ */
+interface SoftPageSignals {
+  commentsDisabled: boolean;
+}
+
+const SOFT_SIGNALS = new WeakMap<Page, SoftPageSignals>();
+
+function getSoftSignals(page: Page): SoftPageSignals {
+  let s = SOFT_SIGNALS.get(page);
+  if (!s) {
+    s = { commentsDisabled: false };
+    SOFT_SIGNALS.set(page, s);
+  }
+  return s;
+}
+
+function resetSoftSignals(page: Page): SoftPageSignals {
+  const s = getSoftSignals(page);
+  s.commentsDisabled = false;
+  return s;
+}
+
 export async function dismissConsent(page: Page): Promise<void> {
   const selectors = [
     'button[aria-label*="Accept"]',
@@ -59,8 +99,9 @@ async function detectPageBlockers(page: Page): Promise<void> {
   if (text.includes("age-restricted") || text.includes("sign in to confirm your age")) {
     throw new Error("YouTube age-restricted: sign in required");
   }
+  // Comments turned off is a soft signal — picked up by the comments phase, never a hard fail.
   if (text.includes("comments are turned off")) {
-    throw new Error("Comments disabled on this video");
+    getSoftSignals(page).commentsDisabled = true;
   }
 }
 
@@ -76,13 +117,20 @@ export async function ensurePanel(page: Page, watchdog?: JobWatchdog): Promise<v
   }
 }
 
+/** Status outcome from the extension panel; never throws for soft empty/disabled signals. */
+export type PhaseStatusOutcome =
+  | { kind: "ok"; text: string }
+  | { kind: "transcript_unavailable"; text: string }
+  | { kind: "comments_disabled"; text: string }
+  | { kind: "comments_empty"; text: string };
+
 async function waitStatusOk(
   page: Page,
   kind: "transcript" | "comments",
   contains: string,
   timeoutMs: number,
   watchdog?: JobWatchdog,
-): Promise<string> {
+): Promise<PhaseStatusOutcome> {
   const sel = `[data-status="${kind}"]`;
   watchdog?.touch(`wait_status_${kind}`);
   await page.waitForFunction(
@@ -94,6 +142,8 @@ async function waitStatusOk(
       if (err && text.includes("no transcript")) return true;
       if (err && text.includes("no comments")) return true;
       if (err && text.includes("unavailable")) return true;
+      if (err && text.includes("disabled")) return true;
+      if (err && text.includes("turned off")) return true;
       const ok = el.classList.contains("cg-ok") || el.classList.contains("cg-warn");
       return ok && text.includes(needle.toLowerCase());
     },
@@ -102,13 +152,23 @@ async function waitStatusOk(
   );
   const statusText = await page.locator(sel).innerText();
   const lower = statusText.toLowerCase();
-  if (lower.includes("no transcript") || lower.includes("transcript unavailable")) {
-    throw new Error("Transcript unavailable for this video");
+  if (kind === "transcript") {
+    if (lower.includes("no transcript") || lower.includes("transcript unavailable")) {
+      return { kind: "transcript_unavailable", text: statusText };
+    }
+    return { kind: "ok", text: statusText };
   }
-  if (lower.includes("no comments found") || lower.includes("comments unavailable")) {
-    throw new Error("Comments unavailable for this video");
+  if (
+    lower.includes("comments are turned off") ||
+    lower.includes("comments disabled") ||
+    lower.includes("comments unavailable")
+  ) {
+    return { kind: "comments_disabled", text: statusText };
   }
-  return statusText;
+  if (lower.includes("no comments")) {
+    return { kind: "comments_empty", text: statusText };
+  }
+  return { kind: "ok", text: statusText };
 }
 
 async function waitButtonEnabled(
@@ -160,6 +220,7 @@ async function withRetries<T>(
 }
 
 async function navigateToVideo(page: Page, videoUrl: string, watchdog?: JobWatchdog): Promise<void> {
+  resetSoftSignals(page);
   await withRetries("navigation", async () => {
     watchdog?.touch("navigate");
     await page.goto(videoUrl, {
@@ -173,13 +234,151 @@ async function navigateToVideo(page: Page, videoUrl: string, watchdog?: JobWatch
   });
 }
 
+async function runTranscriptPhase(
+  page: Page,
+  onAction: (action: string) => void,
+  watchdog?: JobWatchdog,
+): Promise<TranscriptPhaseResult> {
+  onAction("extracting_transcript");
+  let extractStatus: PhaseStatusOutcome | null = null;
+  await withRetries("extract_transcript", async () => {
+    watchdog?.touch("click_extract_transcript");
+    await page.locator(`${PANEL} [data-action="extract-transcript"]`).click();
+    extractStatus = await waitStatusOk(
+      page,
+      "transcript",
+      "characters extracted",
+      config.phaseTimeoutMs,
+      watchdog,
+    );
+  });
+  if (extractStatus && extractStatus.kind === "transcript_unavailable") {
+    return { outcome: "unavailable", status_text: extractStatus.text };
+  }
+
+  onAction("saving_transcript");
+  let saveText = "";
+  let sheets: string | undefined;
+  await withRetries("save_transcript", async () => {
+    await waitButtonEnabled(page, "save-transcript", 30000, watchdog);
+    watchdog?.touch("click_save_transcript");
+    await page.locator(`${PANEL} [data-action="save-transcript"]`).click();
+    const status = await waitStatusOk(
+      page,
+      "transcript",
+      "saved to contentgraph",
+      config.phaseTimeoutMs,
+      watchdog,
+    );
+    if (status.kind === "transcript_unavailable") {
+      // Should not happen on save, but stay safe — bubble up as unavailable.
+      saveText = status.text;
+      sheets = undefined;
+      return;
+    }
+    saveText = status.text;
+    sheets = parseSheetsFromStatus(status.text);
+  });
+
+  if (!saveText) {
+    return { outcome: "unavailable" };
+  }
+  return {
+    outcome: "ok",
+    status_text: saveText.slice(0, 500),
+    sheets_status: sheets,
+  };
+}
+
+async function runCommentsPhase(
+  page: Page,
+  onAction: (action: string) => void,
+  watchdog?: JobWatchdog,
+): Promise<CommentsPhaseResult> {
+  if (getSoftSignals(page).commentsDisabled) {
+    return { outcome: "disabled", status_text: "comments turned off on page" };
+  }
+
+  onAction("extracting_comments");
+  let extractStatus: PhaseStatusOutcome | null = null;
+  await withRetries("extract_comments", async () => {
+    watchdog?.touch("click_extract_comments");
+    await page.locator(`${PANEL} [data-action="extract-comments"]`).click();
+    extractStatus = await waitStatusOk(
+      page,
+      "comments",
+      "top comments",
+      config.phaseTimeoutMs,
+      watchdog,
+    );
+  });
+  if (extractStatus) {
+    if (extractStatus.kind === "comments_disabled") {
+      return { outcome: "disabled", status_text: extractStatus.text };
+    }
+    if (extractStatus.kind === "comments_empty") {
+      return { outcome: "empty", status_text: extractStatus.text };
+    }
+  }
+
+  onAction("saving_comments");
+  let saveText = "";
+  let sheets: string | undefined;
+  await withRetries("save_comments", async () => {
+    await waitButtonEnabled(page, "save-comments", 30000, watchdog);
+    watchdog?.touch("click_save_comments");
+    await page.locator(`${PANEL} [data-action="save-comments"]`).click();
+    const status = await waitStatusOk(
+      page,
+      "comments",
+      "saved",
+      config.phaseTimeoutMs,
+      watchdog,
+    );
+    if (status.kind === "comments_disabled") {
+      saveText = status.text;
+      return;
+    }
+    if (status.kind === "comments_empty") {
+      saveText = status.text;
+      return;
+    }
+    saveText = status.text;
+    sheets = parseSheetsFromStatus(status.text);
+  });
+
+  const lower = saveText.toLowerCase();
+  if (
+    lower.includes("comments are turned off") ||
+    lower.includes("comments disabled") ||
+    lower.includes("comments unavailable")
+  ) {
+    return { outcome: "disabled", status_text: saveText.slice(0, 500) };
+  }
+  if (lower.includes("no comments")) {
+    return { outcome: "empty", status_text: saveText.slice(0, 500) };
+  }
+  return {
+    outcome: "ok",
+    status_text: saveText.slice(0, 500),
+    sheets_status: sheets,
+  };
+}
+
+export interface ProcessVideoResult {
+  overallSuccess: boolean;
+  result: JobResult;
+  transcriptError?: Error;
+  commentsError?: Error;
+}
+
 export async function processVideoOnPage(
   page: Page,
   videoUrl: string,
   mode: string,
   onAction: (action: string) => void,
   watchdog?: JobWatchdog,
-): Promise<JobResult> {
+): Promise<ProcessVideoResult> {
   const logs: string[] = [];
   const result: JobResult = { logs };
   const started = Date.now();
@@ -187,74 +386,66 @@ export async function processVideoOnPage(
   await navigateToVideo(page, videoUrl, watchdog);
   await ensurePanel(page, watchdog);
 
-  if (mode === "transcript" || mode === "both") {
-    onAction("extracting_transcript");
-    logs.push("extract transcript");
-    await withRetries("extract_transcript", async () => {
-      watchdog?.touch("click_extract_transcript");
-      await page.locator(`${PANEL} [data-action="extract-transcript"]`).click();
-      await waitStatusOk(
-        page,
-        "transcript",
-        "characters extracted",
-        config.phaseTimeoutMs,
-        watchdog,
-      );
-    });
+  let transcriptError: Error | undefined;
+  let commentsError: Error | undefined;
 
-    onAction("saving_transcript");
-    logs.push("save transcript");
-    await withRetries("save_transcript", async () => {
-      await waitButtonEnabled(page, "save-transcript", 30000, watchdog);
-      watchdog?.touch("click_save_transcript");
-      await page.locator(`${PANEL} [data-action="save-transcript"]`).click();
-      const tStatus = await waitStatusOk(
-        page,
-        "transcript",
-        "saved to contentgraph",
-        config.phaseTimeoutMs,
-        watchdog,
-      );
-      result.transcript_status = tStatus.slice(0, 500);
-      result.sheets_transcript = parseSheetsFromStatus(tStatus);
-    });
+  if (mode === "transcript" || mode === "both") {
+    logs.push("phase:transcript");
+    try {
+      const t = await runTranscriptPhase(page, onAction, watchdog);
+      result.transcript_outcome = t.outcome;
+      if (t.status_text) result.transcript_status = t.status_text;
+      if (t.sheets_status) result.sheets_transcript = t.sheets_status;
+    } catch (err) {
+      transcriptError = err instanceof Error ? err : new Error(String(err));
+      result.transcript_outcome = "failed";
+      result.transcript_status = transcriptError.message.slice(0, 500);
+      log.warn("transcript phase failed", { error: transcriptError.message });
+    }
+  } else {
+    result.transcript_outcome = "skipped";
   }
 
   if (mode === "comments" || mode === "both") {
-    onAction("extracting_comments");
-    logs.push("extract comments");
-    await withRetries("extract_comments", async () => {
-      watchdog?.touch("click_extract_comments");
-      await page.locator(`${PANEL} [data-action="extract-comments"]`).click();
-      await waitStatusOk(
-        page,
-        "comments",
-        "top comments",
-        config.phaseTimeoutMs,
-        watchdog,
-      );
-    });
-
-    onAction("saving_comments");
-    logs.push("save comments");
-    await withRetries("save_comments", async () => {
-      await waitButtonEnabled(page, "save-comments", 30000, watchdog);
-      watchdog?.touch("click_save_comments");
-      await page.locator(`${PANEL} [data-action="save-comments"]`).click();
-      const cStatus = await waitStatusOk(
-        page,
-        "comments",
-        "saved",
-        config.phaseTimeoutMs,
-        watchdog,
-      );
-      result.comments_status = cStatus.slice(0, 500);
-      result.sheets_comments = parseSheetsFromStatus(cStatus);
-    });
+    logs.push("phase:comments");
+    try {
+      const c = await runCommentsPhase(page, onAction, watchdog);
+      result.comments_outcome = c.outcome;
+      if (c.status_text) result.comments_status = c.status_text;
+      if (c.sheets_status) result.sheets_comments = c.sheets_status;
+    } catch (err) {
+      commentsError = err instanceof Error ? err : new Error(String(err));
+      result.comments_outcome = "failed";
+      result.comments_status = commentsError.message.slice(0, 500);
+      log.warn("comments phase failed", { error: commentsError.message });
+    }
+  } else {
+    result.comments_outcome = "skipped";
   }
 
   result.duration_ms = Date.now() - started;
-  return result;
+
+  // Job-level success:
+  //   - transcript mode: transcript must be ok (unavailable = nothing useful)
+  //   - comments  mode: comments must be ok (disabled/empty = nothing useful)
+  //   - both:     comments are best-effort; any non-failed transcript outcome is fine.
+  //               That way comments-only problems never mark the job (or the worker) as broken.
+  let overallSuccess: boolean;
+  if (mode === "transcript") {
+    overallSuccess = result.transcript_outcome === "ok";
+  } else if (mode === "comments") {
+    overallSuccess = result.comments_outcome === "ok";
+  } else {
+    overallSuccess =
+      result.transcript_outcome === "ok" || result.transcript_outcome === "unavailable";
+  }
+
+  return {
+    overallSuccess,
+    result,
+    transcriptError,
+    commentsError,
+  };
 }
 
 export async function captureFailureScreenshot(

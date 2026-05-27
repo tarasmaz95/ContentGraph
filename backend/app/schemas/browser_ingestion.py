@@ -1,9 +1,12 @@
 """Browser ingestion worker queue schemas."""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+TranscriptOutcome = Literal["ok", "unavailable", "failed", "skipped"]
+CommentsOutcome = Literal["ok", "disabled", "empty", "failed", "skipped"]
 
 
 class BrowserIngestionStartRequest(BaseModel):
@@ -17,6 +20,8 @@ class BrowserIngestionStartRequest(BaseModel):
 class BrowserIngestionJobResult(BaseModel):
     transcript_status: str | None = None
     comments_status: str | None = None
+    transcript_outcome: TranscriptOutcome | None = None
+    comments_outcome: CommentsOutcome | None = None
     sheets_transcript: str | None = None
     sheets_comments: str | None = None
     embedding_created: bool | None = None
@@ -42,6 +47,8 @@ class BrowserIngestionJobRead(BaseModel):
     result_json: dict[str, Any] | None
     transcript_status: str | None = None
     comments_status: str | None = None
+    transcript_outcome: TranscriptOutcome | None = None
+    comments_outcome: CommentsOutcome | None = None
     sheets_status: str | None = None
     embedding_status: str | None = None
     failure_category: str | None = None

@@ -47,11 +47,14 @@ export const config = {
   screenshotDir: resolvePath(process.env.SCREENSHOT_DIR || "./screenshots"),
   /** 0 = unlimited (no daily cap). */
   maxJobsPerDay: num("BROWSER_INGESTION_MAX_JOBS_PER_DAY", 0),
-  maxConsecutiveFailures: num("BROWSER_INGESTION_MAX_CONSECUTIVE_FAILURES", 5),
+  // Only infrastructure failures (timeout, browser_crash, youtube_blocked, extension_error,
+  // unknown) count toward this threshold. Content-only outcomes — no captions / comments
+  // disabled — never bump the counter. See worker/src/safety-limits.ts.
+  maxConsecutiveFailures: num("BROWSER_INGESTION_MAX_CONSECUTIVE_FAILURES", 20),
   cooldownMinutes: num("BROWSER_INGESTION_COOLDOWN_MINUTES", 30),
   restartBrowserEveryJobs: num("RESTART_BROWSER_EVERY_JOBS", 20),
   requiredExtensionVersion: (
-    process.env.REQUIRED_EXTENSION_VERSION || "0.2.6"
+    process.env.REQUIRED_EXTENSION_VERSION || "0.2.7"
   ).trim(),
   phaseRetries: num("PHASE_RETRIES", 2),
 };

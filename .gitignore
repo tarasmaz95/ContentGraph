@@ -25,3 +25,6 @@ dist/
 
 # Docker
 postgres_data/
+
+# Local artifact mirror of frontend/public/downloads/contentgraph-browser-worker.zip
+contentgraph-extension-worker.zip

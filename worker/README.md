@@ -58,7 +58,9 @@ npm start
 ## Safety limits (.env)
 
 - `BROWSER_INGESTION_MAX_JOBS_PER_DAY` — stop claiming after N jobs per day (`0` = unlimited, default)
-- `BROWSER_INGESTION_MAX_CONSECUTIVE_FAILURES` — cooldown after N failures (default 5)
+- `BROWSER_INGESTION_MAX_CONSECUTIVE_FAILURES` — cooldown after N **infrastructure** failures (default 20).
+  Only counts: `timeout`, `browser_crash`, `youtube_blocked`, `extension_error`, `unknown`.
+  Soft outcomes (`transcript_unavailable`, `comments_disabled`, `comments_empty`) never trigger a cooldown.
 - `BROWSER_INGESTION_COOLDOWN_MINUTES` — pause duration (default 30)
 - `BROWSER_CHANNEL` — browser channel for Playwright (default `chromium`)
 - `STUCK_PAGE_MS` — watchdog stuck detection (default 180000)

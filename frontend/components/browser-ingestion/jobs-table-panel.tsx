@@ -15,7 +15,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { fetchBrowserIngestionJobs } from "@/services/api";
-import { friendlyFailure, friendlyJobStatus } from "@/lib/browser-ingestion-labels";
+import {
+  commentsOutcomeTone,
+  friendlyCommentsOutcome,
+  friendlyFailure,
+  friendlyJobStatus,
+  friendlyTranscriptOutcome,
+  outcomeBadgeClass,
+  transcriptOutcomeTone,
+} from "@/lib/browser-ingestion-labels";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { BrowserIngestionJob, BrowserJobStatusFilter } from "@/types/browser-ingestion";
@@ -157,15 +165,16 @@ export function BrowserJobsTablePanel({
           />
         ) : (
           <>
-            <table className="w-full min-w-[900px] text-left text-sm">
+            <table className="w-full min-w-[1000px] text-left text-sm">
               <thead>
                 <tr className="border-b text-xs uppercase text-muted-foreground">
                   <th className="w-6 py-2" />
                   <th className="py-2 pr-2">{t("browserIngestion.colTitle")}</th>
                   <th className="py-2 pr-2">{t("browserIngestion.colStatus")}</th>
+                  <th className="py-2 pr-2">{t("browserIngestion.colTranscript")}</th>
+                  <th className="py-2 pr-2">{t("browserIngestion.colComments")}</th>
                   <th className="py-2 pr-2">{t("browserIngestion.colRetries")}</th>
                   <th className="py-2 pr-2">{t("browserIngestion.colDuration")}</th>
-                  <th className="py-2 pr-2">{t("browserIngestion.colCategory")}</th>
                   <th className="py-2">{t("browserIngestion.colUpdated")}</th>
                 </tr>
               </thead>
@@ -176,8 +185,11 @@ export function BrowserJobsTablePanel({
                     job.status === "failed" ||
                     Boolean(job.error_message) ||
                     job.retry_history.length > 0 ||
-                    Boolean(job.screenshot_path);
+                    Boolean(job.screenshot_path) ||
+                    Boolean(job.failure_category);
                   const friendlyFail = friendlyFailure(job.failure_category, t);
+                  const transcriptLabel = friendlyTranscriptOutcome(job.transcript_outcome, t);
+                  const commentsLabel = friendlyCommentsOutcome(job.comments_outcome, t);
 
                   return (
                     <Fragment key={job.id}>
@@ -216,12 +228,37 @@ export function BrowserJobsTablePanel({
                             {friendlyJobStatus(job.status, t)}
                           </span>
                         </td>
+                        <td className="py-2 pr-2">
+                          {transcriptLabel ? (
+                            <span
+                              className={cn(
+                                "inline-block rounded px-1.5 py-0.5 text-xs font-medium",
+                                outcomeBadgeClass(transcriptOutcomeTone(job.transcript_outcome)),
+                              )}
+                            >
+                              {transcriptLabel}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-2">
+                          {commentsLabel ? (
+                            <span
+                              className={cn(
+                                "inline-block rounded px-1.5 py-0.5 text-xs font-medium",
+                                outcomeBadgeClass(commentsOutcomeTone(job.comments_outcome)),
+                              )}
+                            >
+                              {commentsLabel}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </td>
                         <td className="py-2 pr-2 tabular-nums text-xs">{job.retry_count}</td>
                         <td className="py-2 pr-2 tabular-nums text-xs">
                           {job.duration_seconds != null ? `${job.duration_seconds}s` : "—"}
-                        </td>
-                        <td className="max-w-[180px] truncate py-2 pr-2 text-xs">
-                          {friendlyFail || "—"}
                         </td>
                         <td className="whitespace-nowrap py-2 text-xs text-muted-foreground">
                           {formatUtc(job.updated_at)}
@@ -229,11 +266,18 @@ export function BrowserJobsTablePanel({
                       </tr>
                       {expanded && hasDetails && (
                         <tr className="border-b border-border/40 bg-muted/20">
-                          <td colSpan={7} className="px-4 py-4">
+                          <td colSpan={8} className="px-4 py-4">
                             <div className="space-y-3 rounded-lg border border-border/60 bg-card p-4">
-                              {job.status === "failed" && friendlyFail && (
-                                <p className="text-sm font-medium text-foreground">
-                                  {friendlyFail}
+                              {friendlyFail && (
+                                <p
+                                  className={cn(
+                                    "text-sm font-medium",
+                                    job.status === "failed"
+                                      ? "text-foreground"
+                                      : "text-muted-foreground",
+                                  )}
+                                >
+                                  {t("browserIngestion.colCategory")}: {friendlyFail}
                                 </p>
                               )}
                               {job.screenshot_path && (

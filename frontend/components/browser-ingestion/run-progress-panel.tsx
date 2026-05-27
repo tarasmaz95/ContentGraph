@@ -30,9 +30,20 @@ export function BrowserRunProgressPanel({
   const throughput = computeBrowserThroughput(run, worker?.jobs_per_min);
   const active = isBrowserIngestionRunActive(run);
   const terminal = isBrowserIngestionRunTerminal(run);
+  // Cooldown only counts when a real future timestamp is set on the worker.
+  // Stale `health_status === "cooldown"` alone (e.g. after a soft-failure burst that no longer
+  // bumps the counter) must not pop a banner.
+  const cooldownActive = (() => {
+    if (!worker || worker.health_status !== "cooldown") return false;
+    if (!worker.cooldown_until) return false;
+    const until = Date.parse(worker.cooldown_until);
+    return Number.isFinite(until) && until > Date.now();
+  })();
   const blockedWorker =
     active && worker
-      ? ["cooldown", "incompatible_extension", "offline"].includes(worker.health_status) ||
+      ? cooldownActive ||
+        worker.health_status === "incompatible_extension" ||
+        worker.health_status === "offline" ||
         (worker.health_status === "daily_limit" &&
           worker.max_jobs_per_day != null &&
           worker.max_jobs_per_day > 0)
@@ -70,13 +81,17 @@ export function BrowserRunProgressPanel({
               })}
             </p>
             <p className="text-xs text-amber-800/80 dark:text-amber-100/80">
-              {t("browserIngestion.runWaitingForWorkerHint", {
-                queued: String(stats.queued),
-                failed: String(stats.failed),
-                processing: String(stats.processing),
-              })}
+              {cooldownActive
+                ? t("browserIngestion.runWaitingForWorkerCooldownHint", {
+                    failures: String(blockedWorker.consecutive_failures),
+                  })
+                : t("browserIngestion.runWaitingForWorkerHint", {
+                    queued: String(stats.queued),
+                    failed: String(stats.failed),
+                    processing: String(stats.processing),
+                  })}
             </p>
-            {blockedWorker.cooldown_until && (
+            {cooldownActive && blockedWorker.cooldown_until && (
               <p className="text-xs text-amber-800/80 dark:text-amber-100/80">
                 {t("browserIngestion.cooldownUntil", {
                   time: formatDateTime(blockedWorker.cooldown_until),

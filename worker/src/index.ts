@@ -215,7 +215,7 @@ async function main(): Promise<void> {
       const watchdog = new JobWatchdog();
 
       try {
-        const result = await watchdog.race(
+        const processed = await watchdog.race(
           processVideoOnPage(
             page,
             job.video_url,
@@ -229,14 +229,85 @@ async function main(): Promise<void> {
           ),
         );
 
+        const result = processed.result;
         result.duration_ms = result.duration_ms ?? Date.now() - jobStarted;
-        await completeJob(job.id, result);
-        safetyState = recordJobSuccess(safetyState);
-        successToday += 1;
-        jobsCompletedSession += 1;
-        incrementJobsSinceRestart();
-        log.info("job success", { job_id: job.id, duration_ms: result.duration_ms });
+        result.logs = [...result.logs, ...jobLogs];
+
+        if (processed.overallSuccess) {
+          // Partial success counts: comments may be `failed/disabled/empty`,
+          // but the job itself succeeded (transcript saved or unavailable).
+          const softFailureMessages: string[] = [];
+          if (processed.commentsError) {
+            softFailureMessages.push(`comments: ${processed.commentsError.message}`);
+          }
+          if (result.comments_outcome === "disabled") {
+            softFailureMessages.push("comments disabled on this video");
+          }
+          if (softFailureMessages.length > 0) {
+            result.logs.push(...softFailureMessages);
+          }
+          await completeJob(job.id, result);
+          safetyState = recordJobSuccess(safetyState);
+          successToday += 1;
+          jobsCompletedSession += 1;
+          incrementJobsSinceRestart();
+          log.info("job success", {
+            job_id: job.id,
+            duration_ms: result.duration_ms,
+            transcript_outcome: result.transcript_outcome,
+            comments_outcome: result.comments_outcome,
+          });
+        } else {
+          // Mode-specific primary phase did not reach `ok` — record as a job-level failure.
+          // We still pick a precise category so safety-limits can decide whether to count it.
+          const err = processed.transcriptError || processed.commentsError;
+          let category: FailureCategory;
+          let message: string;
+          if (result.transcript_outcome === "unavailable") {
+            category = "transcript_unavailable";
+            message = result.transcript_status || "Transcript unavailable for this video";
+          } else if (result.comments_outcome === "disabled") {
+            category = "comments_disabled";
+            message = result.comments_status || "Comments disabled on this video";
+          } else if (result.comments_outcome === "empty") {
+            category = "comments_disabled";
+            message = result.comments_status || "No comments found on this video";
+          } else if (err) {
+            category = categorizeFailure(err.message);
+            message = err.message;
+          } else {
+            category = "unknown";
+            message = `transcript=${result.transcript_outcome ?? "?"} comments=${result.comments_outcome ?? "?"}`;
+          }
+          retryHistory.push(`${new Date().toISOString()} ${category}: ${message}`);
+
+          const screenshot = await captureFailureScreenshot(page, job.id);
+          if (screenshot) {
+            lastScreenshot = screenshot;
+            result.screenshot_path = screenshot;
+          }
+          result.failure_category = category;
+          result.current_phase = currentPhase;
+          result.retry_history = retryHistory;
+
+          const retryable = isRetryableCategory(category);
+          await failJob(job.id, message.slice(0, 4000), result, retryable);
+          safetyState = recordJobFailure(safetyState, category);
+          failedToday += 1;
+          jobsCompletedSession += 1;
+          incrementJobsSinceRestart();
+
+          log.warn("job failed (phase)", {
+            job_id: job.id,
+            category,
+            error: message,
+            retryable,
+            transcript_outcome: result.transcript_outcome,
+            comments_outcome: result.comments_outcome,
+          });
+        }
       } catch (err) {
+        // Watchdog / browser crash / unexpected exception — hard infrastructure failure.
         const message = err instanceof Error ? err.message : String(err);
         const category: FailureCategory = categorizeFailure(message);
         jobLogs.push(message);
@@ -252,17 +323,18 @@ async function main(): Promise<void> {
           duration_ms: Date.now() - jobStarted,
           current_phase: currentPhase,
           retry_history: retryHistory,
-          transcript_status: "error",
+          transcript_outcome: "failed",
+          transcript_status: message.slice(0, 500),
         };
 
         const retryable = isRetryableCategory(category);
         await failJob(job.id, message.slice(0, 4000), result, retryable);
-        safetyState = recordJobFailure(safetyState);
+        safetyState = recordJobFailure(safetyState, category);
         failedToday += 1;
         jobsCompletedSession += 1;
         incrementJobsSinceRestart();
 
-        log.error("job failed", {
+        log.error("job failed (infra)", {
           job_id: job.id,
           category,
           error: message,

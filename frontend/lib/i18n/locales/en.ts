@@ -232,6 +232,8 @@ export const en: TranslationTree = {
     runIdle: "No run — enqueue videos, then start the worker locally",
     runCompleted: "Run finished.",
     runWaitingForWorker: "Run is not stuck — worker status is: {{status}}.",
+    runWaitingForWorkerCooldownHint:
+      "Worker hit {{failures}} consecutive infrastructure failures (timeout / crash / YouTube blocked). Missing comments and missing transcripts do not contribute to the pause.",
     runWaitingForWorkerHint:
       "{{queued}} queued, {{processing}} processing, {{failed}} failed. New videos will not start until the worker resumes.",
     cooldownUntil: "Cooldown until {{time}}.",
@@ -296,6 +298,21 @@ export const en: TranslationTree = {
       browser_crash: "Browser crash",
       timeout: "Timeout",
       unknown: "Unknown",
+    },
+    outcome: {
+      transcript: {
+        ok: "Saved",
+        unavailable: "No transcript",
+        failed: "Failed",
+        skipped: "Skipped",
+      },
+      comments: {
+        ok: "Saved",
+        disabled: "Disabled",
+        empty: "Empty",
+        failed: "Failed",
+        skipped: "Skipped",
+      },
     },
   },
   transcriptApiIngestion: {

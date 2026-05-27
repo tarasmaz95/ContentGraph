@@ -12,9 +12,14 @@ export interface Job {
   status: string;
 }
 
+export type TranscriptOutcome = "ok" | "unavailable" | "failed" | "skipped";
+export type CommentsOutcome = "ok" | "disabled" | "empty" | "failed" | "skipped";
+
 export interface JobResult {
   transcript_status?: string;
   comments_status?: string;
+  transcript_outcome?: TranscriptOutcome;
+  comments_outcome?: CommentsOutcome;
   sheets_transcript?: string;
   sheets_comments?: string;
   embedding_created?: boolean;

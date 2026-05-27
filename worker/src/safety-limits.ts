@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "./config.js";
+import type { FailureCategory } from "./failure-taxonomy.js";
 import { log } from "./logger.js";
 
 export interface SafetyState {
@@ -9,6 +10,20 @@ export interface SafetyState {
   consecutiveFailures: number;
   cooldownUntil: string | null;
   lastSuccessAt: string | null;
+}
+
+/**
+ * Soft failure categories never increment the consecutive-failure counter and
+ * never trigger a cooldown — they describe content (no captions, comments off),
+ * not infrastructure problems with the worker / browser / YouTube access.
+ */
+const SOFT_FAILURE_CATEGORIES = new Set<FailureCategory>([
+  "comments_disabled",
+  "transcript_unavailable",
+]);
+
+export function isSoftFailureCategory(category: FailureCategory | undefined): boolean {
+  return category !== undefined && SOFT_FAILURE_CATEGORIES.has(category);
 }
 
 function todayKey(): string {
@@ -113,7 +128,21 @@ export function clearCooldown(state?: SafetyState): SafetyState {
   return next;
 }
 
-export function recordJobFailure(state: SafetyState): SafetyState {
+export function recordJobFailure(
+  state: SafetyState,
+  category?: FailureCategory,
+): SafetyState {
+  // Soft failures count toward processedToday but never bump the cooldown counter.
+  if (isSoftFailureCategory(category)) {
+    const next: SafetyState = {
+      ...state,
+      day: todayKey(),
+      processedToday: state.processedToday + 1,
+    };
+    saveSafetyState(next);
+    return next;
+  }
+
   const failures = state.consecutiveFailures + 1;
   let cooldownUntil = state.cooldownUntil;
   if (
@@ -124,6 +153,7 @@ export function recordJobFailure(state: SafetyState): SafetyState {
     cooldownUntil = until.toISOString();
     log.warn("safety cooldown triggered", {
       failures,
+      category,
       cooldown_until: cooldownUntil,
     });
   }

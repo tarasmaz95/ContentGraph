@@ -231,6 +231,8 @@ export const uk: TranslationTree = {
     runIdle: "Немає run — додайте відео в чергу і запустіть worker",
     runCompleted: "Run завершено.",
     runWaitingForWorker: "Run не завис — worker зараз має статус: {{status}}.",
+    runWaitingForWorkerCooldownHint:
+      "Worker отримав {{failures}} інфраструктурних помилок поспіль (timeout / crash / YouTube blocked). Помилки коментарів і відсутність транскрипту не впливають на паузу.",
     runWaitingForWorkerHint:
       "У черзі {{queued}}, в обробці {{processing}}, помилок {{failed}}. Нові відео не стартують, доки worker не повернеться в роботу.",
     cooldownUntil: "Пауза до {{time}}.",
@@ -295,6 +297,21 @@ export const uk: TranslationTree = {
       browser_crash: "Падіння браузера",
       timeout: "Таймаут",
       unknown: "Невідомо",
+    },
+    outcome: {
+      transcript: {
+        ok: "Збережено",
+        unavailable: "Без транскрипту",
+        failed: "Помилка",
+        skipped: "Пропущено",
+      },
+      comments: {
+        ok: "Збережено",
+        disabled: "Вимкнено",
+        empty: "Порожньо",
+        failed: "Помилка",
+        skipped: "Пропущено",
+      },
     },
   },
   transcriptApiIngestion: {

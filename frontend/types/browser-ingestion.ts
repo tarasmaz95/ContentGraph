@@ -27,6 +27,9 @@ export type FailureCategory =
   | "timeout"
   | "unknown";
 
+export type TranscriptOutcome = "ok" | "unavailable" | "failed" | "skipped";
+export type CommentsOutcome = "ok" | "disabled" | "empty" | "failed" | "skipped";
+
 export type WorkerHealthStatus =
   | "healthy"
   | "offline"
@@ -61,6 +64,8 @@ export interface BrowserIngestionJob {
   error_message: string | null;
   transcript_status: string | null;
   comments_status: string | null;
+  transcript_outcome: TranscriptOutcome | null;
+  comments_outcome: CommentsOutcome | null;
   sheets_status: string | null;
   embedding_status: string | null;
   failure_category: FailureCategory | string | null;

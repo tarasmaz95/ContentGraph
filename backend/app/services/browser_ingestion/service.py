@@ -662,6 +662,11 @@ class BrowserIngestionService:
             elif video.transcript:
                 embedding_status = "pending"
 
+        transcript_outcome = _derive_transcript_outcome(
+            job, rj, transcript_status, video
+        )
+        comments_outcome = _derive_comments_outcome(job, rj, comments_status)
+
         duration_seconds = None
         if rj.get("duration_ms"):
             duration_seconds = round(float(rj["duration_ms"]) / 1000.0, 1)
@@ -690,6 +695,8 @@ class BrowserIngestionService:
             result_json=job.result_json,
             transcript_status=transcript_status,
             comments_status=comments_status,
+            transcript_outcome=transcript_outcome,
+            comments_outcome=comments_outcome,
             sheets_status=sheets_status,
             embedding_status=embedding_status,
             failure_category=rj.get("failure_category"),
@@ -791,3 +798,69 @@ class BrowserIngestionService:
         if job is None:
             raise ValueError(f"Job {job_id} not found")
         return job
+
+
+_TRANSCRIPT_OUTCOMES = {"ok", "unavailable", "failed", "skipped"}
+_COMMENTS_OUTCOMES = {"ok", "disabled", "empty", "failed", "skipped"}
+
+
+def _derive_transcript_outcome(
+    job: BrowserIngestionJob,
+    rj: dict[str, Any],
+    transcript_status: str | None,
+    video: Video | None,
+) -> str | None:
+    """Worker may now send `transcript_outcome` directly; legacy jobs derive from status text + DB."""
+    raw = rj.get("transcript_outcome")
+    if isinstance(raw, str) and raw in _TRANSCRIPT_OUTCOMES:
+        return raw
+
+    mode = (job.mode or "").lower()
+    if mode == "comments":
+        return "skipped"
+
+    text = (transcript_status or "").lower()
+    category = (rj.get("failure_category") or "").lower()
+
+    if text and ("saved" in text or "in_db" in text or "characters extracted" in text):
+        return "ok"
+    if "unavailable" in text or "no transcript" in text or category == "transcript_unavailable":
+        return "unavailable"
+    if video and video.transcript and str(video.transcript).strip():
+        return "ok"
+    if job.status == "failed":
+        return "failed"
+    if job.status == "success":
+        return "ok"
+    return None
+
+
+def _derive_comments_outcome(
+    job: BrowserIngestionJob,
+    rj: dict[str, Any],
+    comments_status: str | None,
+) -> str | None:
+    raw = rj.get("comments_outcome")
+    if isinstance(raw, str) and raw in _COMMENTS_OUTCOMES:
+        return raw
+
+    mode = (job.mode or "").lower()
+    if mode == "transcript":
+        return "skipped"
+
+    text = (comments_status or "").lower()
+    category = (rj.get("failure_category") or "").lower()
+
+    if text and "saved" in text:
+        return "ok"
+    if category == "comments_disabled" or "disabled" in text or "turned off" in text:
+        return "disabled"
+    if "no comments" in text or "unavailable" in text:
+        return "empty"
+    if job.status == "failed":
+        # Hard failure of the whole job — we cannot tell from legacy data which phase broke.
+        # Leave null to avoid showing a misleading red "comments" badge.
+        return None
+    if job.status == "success":
+        return "ok"
+    return None
