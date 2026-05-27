@@ -92,13 +92,38 @@ consumers see no schema break.
 - Top comments list now shows Pinned / Hearted badges and reply count when
   present. Cards stay backward-compatible when the fields are absent.
 
+## Sheets writeback (completed in v0.2.9 follow-up)
+
+`format_comments_for_sheet` no longer collapses structured data — the Sheets
+Comments column now mirrors what the DB and Audience Intelligence already see.
+
+New per-row helper `format_comment_for_sheet(comment)` renders:
+
+```
+[📌] [❤️] @author (1.2K likes, 42 replies): text…
+```
+
+Rules:
+- counts ≥ 1000 collapse to `K` / `M` (`12000 → 12K`, `1_500_000 → 1.5M`);
+- replies shown only when `reply_count > 0`;
+- `is_pinned` → `📌` badge, `is_hearted` → `❤️` badge;
+- legacy rows without counts fall back to `Author: text` (no parentheses) so
+  pre-v0.2.8 entries look identical to before;
+- per-comment text capped at 500 chars (silent `…`), whole-cell still capped
+  at 10 000 chars with the `[more comments in ContentGraph]` marker;
+- `SheetsCommentsWritebackService` sorts payload by `comment_score DESC`
+  before formatting → Sheets cell is deterministic and matches DB ranking;
+- single structured QA log line per writeback: `written_count, avg_likes,
+  top_likes, pinned, hearted, formatted_chars, blob_truncated`.
+
+Coverage: `backend/tests/test_comments_format.py` (21 cases incl. legacy,
+structured, pinned/hearted, 0-likes, 1.2K, M, unicode/emoji, per-comment
+truncation, blob truncation, mixed legacy+structured).
+
 ## What did **not** change
 
 - API contract (`POST /comments/ingest`) — same URL, same response, just
   accepts more optional fields.
-- Sheets writeback format — still `Author: text\n…`. Adding a separate
-  `Likes` column would require a Sheet-side mapping, which the operator can do
-  later without code changes.
 - Embeddings, retrieval, hybrid search — still read `comment_text`.
 - Browser ingestion worker behaviour — still drives the existing
   `[data-action="extract-comments"]` / `save-comments` buttons.

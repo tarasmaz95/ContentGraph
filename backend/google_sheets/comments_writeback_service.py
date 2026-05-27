@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models.video import Video
+from app.services.comments.scoring import compute_comment_score
 from app.services.settings import AppSettingsService
 from app.services.transcripts.transcript_service import TranscriptService
 from google_sheets.a1 import cell_a1
@@ -44,12 +45,52 @@ class SheetsCommentsWritebackService:
                 message="Sheets write-back disabled",
             )
 
-        cell_text, _ = format_comments_for_sheet(comments)
+        # Deterministic ordering — Sheets cell must reflect the same ranking
+        # that DB / Audience Intelligence use. We compute score on the fly so
+        # this service stays independent of the in-memory dict shape coming
+        # from ingest (which doesn't carry the persisted `comment_score`).
+        ordered = sorted(
+            comments,
+            key=lambda c: (
+                compute_comment_score(
+                    likes_count=int(c.get("likes_count") or c.get("likes") or 0),
+                    reply_count=int(c.get("reply_count") or 0),
+                    is_pinned=bool(c.get("is_pinned")),
+                    is_hearted=bool(c.get("is_hearted")),
+                ),
+                int(c.get("likes_count") or c.get("likes") or 0),
+            ),
+            reverse=True,
+        )
+
+        cell_text, was_truncated = format_comments_for_sheet(ordered)
         if not cell_text:
             return SheetsWritebackResult(
                 status="skipped",
                 message="No comments text to write",
             )
+
+        # QA structured log — single line, easy to grep.
+        likes_values = [
+            int(c.get("likes_count") or c.get("likes") or 0) for c in ordered
+        ]
+        avg_likes = (sum(likes_values) / len(likes_values)) if likes_values else 0
+        top_likes = max(likes_values) if likes_values else 0
+        pinned_count = sum(1 for c in ordered if c.get("is_pinned"))
+        hearted_count = sum(1 for c in ordered if c.get("is_hearted"))
+        logger.info(
+            "sheets_comments_format_qa video_id=%s written_count=%s "
+            "avg_likes=%.1f top_likes=%s pinned=%s hearted=%s "
+            "formatted_chars=%s blob_truncated=%s",
+            video.id,
+            len(ordered),
+            avg_likes,
+            top_likes,
+            pinned_count,
+            hearted_count,
+            len(cell_text),
+            was_truncated,
+        )
 
         try:
             config = await AppSettingsService(self._db).resolve_sheets()
