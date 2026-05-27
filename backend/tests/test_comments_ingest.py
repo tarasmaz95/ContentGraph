@@ -107,3 +107,47 @@ def test_comments_ingest_legacy_v027_payload_still_works(api_v1: httpx.Client) -
     )
     assert response.status_code == 200
     assert response.json()["matched"] is False
+
+
+def test_comments_ingest_accepts_50_v029_payload(api_v1: httpx.Client) -> None:
+    """v0.2.9+ extensions ship up to 50 ranked comments. Cap should be honored."""
+    items = [
+        {
+            "author": f"@user{i}",
+            "text": f"v0.2.9 ranked comment #{i}",
+            "likes_count": 1000 - i,
+            "reply_count": i % 12,
+            "is_pinned": i == 0,
+            "is_hearted": i in (1, 2),
+        }
+        for i in range(50)
+    ]
+    response = api_v1.post(
+        "/comments/ingest",
+        json={
+            "video_url": "https://www.youtube.com/watch?v=zzzzzzzzzzz",
+            "title": "__nonexistent_title_xyz__",
+            "creator": "__nonexistent_creator_xyz__",
+            "comments": items,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["matched"] is False
+
+
+def test_comments_ingest_rejects_51_payload(api_v1: httpx.Client) -> None:
+    """Anything above the 50-cap must be rejected — guards us from runaway extensions."""
+    items = [
+        {"author": f"@u{i}", "text": f"overflow #{i}", "likes_count": i}
+        for i in range(51)
+    ]
+    response = api_v1.post(
+        "/comments/ingest",
+        json={
+            "video_url": "https://www.youtube.com/watch?v=zzzzzzzzzzz",
+            "title": "__nonexistent_title_xyz__",
+            "creator": "__nonexistent_creator_xyz__",
+            "comments": items,
+        },
+    )
+    assert response.status_code == 422

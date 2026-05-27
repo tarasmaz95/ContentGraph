@@ -926,15 +926,43 @@
     return (t || "").replace(/\s+/g, " ").trim();
   }
 
-  /** Comments-only tuning — transcript flow does not use these. */
-  const COMMENTS_FINAL_MAX = 20;
-  const COMMENTS_POOL_MAX = 80;
-  const COMMENTS_SCROLL_STEPS = 6;
-  const COMMENTS_SCROLL_PAUSE_MS = 450;
-  const COMMENTS_SORT_WAIT_MS = 1200;
-  const COMMENTS_LOAD_BUDGET_MS = 5500;
-  const COMMENTS_WAIT_MS = 10000;
-  const COMMENTS_POLL_MS = 350;
+  /**
+   * Comments-only tuning — transcript flow does not use these.
+   *
+   * Pipeline (extension v0.2.9+):
+   *   scrollToComments → ensureCommentsTopSort → deepLoadComments
+   *   → scrapeCommentsPool (dedupe by author+text) → rankComments
+   *   → take top COMMENTS_TOP_N → save via background fetch
+   */
+  // Final cap shipped to backend (must stay ≤ CommentsIngestRequest.max_length=50).
+  const COMMENTS_TOP_N = 50;
+  // Stop scrolling once the deduped pool reaches this size — gives ranking room
+  // without scrolling forever on viral videos with 50k+ comments.
+  const COMMENTS_DEEP_TARGET = 400;
+  // Hard ceiling on scroll attempts — keeps phase under worker phaseTimeoutMs (120s).
+  // Worst case: 35 * (1800 + 480) ≈ 80s, leaving ~40s budget for sort/save.
+  const COMMENTS_DEEP_MAX_ITER = 35;
+  // Human-like delay between scrolls (uniform random).
+  const COMMENTS_DEEP_SCROLL_MIN_MS = 700;
+  const COMMENTS_DEEP_SCROLL_MAX_MS = 1800;
+  // Exit early when the visible thread count does not grow N times in a row.
+  const COMMENTS_DEEP_STAGNANT_LIMIT = 5;
+  // Tiny jitter when waiting for DOM to settle after a scroll step.
+  const COMMENTS_DEEP_SETTLE_MIN_MS = 200;
+  const COMMENTS_DEEP_SETTLE_MAX_MS = 480;
+  // Sort menu rerender wait after switching to Top.
+  const COMMENTS_SORT_WAIT_MS = 1500;
+  // Heartbeat / progress update cadence for the panel status.
+  const COMMENTS_PROGRESS_EVERY = 4;
+
+  // Ranking weights — combine likes, engagement, and creator endorsement.
+  const COMMENTS_RANK_REPLY_WEIGHT = 2;
+  const COMMENTS_RANK_PINNED_BONUS = 1000;
+  const COMMENTS_RANK_HEARTED_BONUS = 250;
+
+  function randomBetween(minMs, maxMs) {
+    return minMs + Math.floor(Math.random() * Math.max(1, maxMs - minMs + 1));
+  }
 
   async function scrollToComments() {
     const section =
@@ -947,13 +975,21 @@
   }
 
   function getCommentsSortButton() {
-    const header = document.querySelector("ytd-comments-header-renderer");
+    // Layered selectors — YouTube ships at least three different DOM shells
+    // (legacy paper, polymer, polymer-2) for the sort control. Try each.
+    const header =
+      document.querySelector("ytd-comments-header-renderer") ||
+      document.querySelector("ytd-comments#comments ytd-comments-header-renderer");
     if (!header) return null;
     return (
       header.querySelector("#sort-menu tp-yt-paper-button") ||
       header.querySelector("#sort-menu button") ||
       header.querySelector("#sort-menu yt-sort-filter-sub-menu-renderer button") ||
-      header.querySelector('tp-yt-paper-button[aria-label*="Sort" i]')
+      header.querySelector("yt-sort-filter-sub-menu-renderer button") ||
+      header.querySelector("yt-dropdown-menu") ||
+      header.querySelector('tp-yt-paper-button[aria-label*="Sort" i]') ||
+      header.querySelector('button[aria-label*="Sort" i]') ||
+      header.querySelector('[role="combobox"]')
     );
   }
 
@@ -998,7 +1034,15 @@
     return false;
   }
 
-  /** Best-effort Top sort; never throws — warns in console on failure. */
+  /**
+   * Best-effort Top sort enforcement.
+   *
+   * 1. Detect current sort label.
+   * 2. If already "Top" — done.
+   * 3. Otherwise open the sort menu, click the Top item, wait for rerender,
+   *    then verify the label flipped. Returns true when confirmed, false when
+   *    YouTube's UI failed to switch (we continue ingestion anyway, never throw).
+   */
   async function ensureCommentsTopSort() {
     const detected = detectCommentsSortLabel();
     cgLog("comments_sort_detected", detected);
@@ -1013,17 +1057,44 @@
       console.warn("[ContentGraph] comments_sort: cannot open menu — continuing");
       return false;
     }
+
+    const threadsBefore = document.querySelectorAll("ytd-comment-thread-renderer").length;
+
     try {
       btn.click();
-      await sleep(320);
+      await sleep(380);
       if (!clickTopSortMenuItem()) {
         console.warn("[ContentGraph] comments_sort: Top menu item not found — continuing");
+        // Close any open overlay.
         document.body.click();
         return false;
       }
       cgLog("comments_sort_switched", { from: detected.label });
-      await sleep(COMMENTS_SORT_WAIT_MS);
-      return true;
+
+      // Confirm the switch: wait for either the label to flip or for the
+      // comments list to rerender (thread count typically resets to 20 after
+      // a sort change).
+      const deadline = Date.now() + COMMENTS_SORT_WAIT_MS;
+      let confirmed = false;
+      while (Date.now() < deadline) {
+        await sleep(180);
+        const now = detectCommentsSortLabel();
+        if (now.isTop) {
+          confirmed = true;
+          break;
+        }
+        const threadsNow = document.querySelectorAll(
+          "ytd-comment-thread-renderer",
+        ).length;
+        // List was rerendered (count dropped or refreshed) — accept as success.
+        if (threadsNow !== threadsBefore && threadsNow > 0) {
+          confirmed = true;
+          break;
+        }
+      }
+
+      cgLog("comments_sort_confirmed", { confirmed });
+      return confirmed;
     } catch (err) {
       console.warn("[ContentGraph] comments_sort failed — continuing", err);
       return false;
@@ -1102,24 +1173,70 @@
     };
   }
 
-  /** Collect up to maxItems unique threads from current DOM (no final cap). */
+  /** Dedupe key — author + first 80 chars of text. Empty author falls back to text-only. */
+  function commentDedupeKey(item) {
+    const author = (item.author || "").trim().toLowerCase();
+    const body = (item.text || "").trim().toLowerCase().slice(0, 80);
+    return author ? `${author}|${body}` : body;
+  }
+
+  /**
+   * Collect every thread currently in the DOM. Caller decides when to stop
+   * scrolling — this just snapshots state.
+   *
+   * Dedupes on (author + text-prefix); when the same key appears twice, keep
+   * the row with the higher likes count (YouTube sometimes re-renders the
+   * same comment with stale "0" likes during scroll).
+   */
   function scrapeCommentsPool(maxItems) {
     const threads = document.querySelectorAll("ytd-comment-thread-renderer");
-    const byText = new Map();
+    const byKey = new Map();
 
     for (const thread of threads) {
       const item = scrapeCommentFromThread(thread);
       if (!item) continue;
-      const key = item.text.toLowerCase();
-      const prev = byText.get(key);
-      if (!prev || item.likes > prev.likes) byText.set(key, item);
-      if (byText.size >= maxItems) break;
+      const key = commentDedupeKey(item);
+      const prev = byKey.get(key);
+      if (!prev || (item.likes || 0) > (prev.likes || 0)) byKey.set(key, item);
+      if (maxItems && byKey.size >= maxItems) break;
     }
-    return Array.from(byText.values());
+    return Array.from(byKey.values());
   }
 
+  /**
+   * Composite ranking: likes are the dominant signal, replies amplify
+   * engagement, pinned/hearted are creator endorsements that should always
+   * float to the top.
+   */
+  function commentScore(item) {
+    const likes = item.likes_count ?? item.likes ?? 0;
+    const replies = item.reply_count ?? 0;
+    const pinnedBonus = item.is_pinned ? COMMENTS_RANK_PINNED_BONUS : 0;
+    const heartedBonus = item.is_hearted ? COMMENTS_RANK_HEARTED_BONUS : 0;
+    return (
+      likes +
+      replies * COMMENTS_RANK_REPLY_WEIGHT +
+      pinnedBonus +
+      heartedBonus
+    );
+  }
+
+  function rankComments(pool, n) {
+    return [...pool]
+      .sort((a, b) => {
+        const sa = commentScore(a);
+        const sb = commentScore(b);
+        if (sb !== sa) return sb - sa;
+        // Tie-break: longer comments usually have more substance.
+        return (b.text?.length || 0) - (a.text?.length || 0);
+      })
+      .slice(0, n);
+  }
+
+  // Backward-compat alias used elsewhere in the file (if any callers stick to
+  // the old name).
   function selectTopComments(pool, n) {
-    return [...pool].sort((a, b) => b.likes - a.likes).slice(0, n);
+    return rankComments(pool, n);
   }
 
   async function scrollCommentsStep() {
@@ -1140,74 +1257,103 @@
   }
 
   /**
-   * Poll DOM for comment threads (like extractTranscriptWithRetry).
-   * Assumes scroll + Top sort already ran.
+   * Production-grade deep loader.
+   *
+   * - Scrolls progressively with randomized human-like delays.
+   * - Tracks visible thread count; exits early when DOM stops growing
+   *   `COMMENTS_DEEP_STAGNANT_LIMIT` iterations in a row.
+   * - Exits when the deduped pool reaches `COMMENTS_DEEP_TARGET`.
+   * - Hard ceiling at `COMMENTS_DEEP_MAX_ITER` iterations to stay well below
+   *   the worker's phase timeout (120s).
+   * - Reports progress through `onStatus` every few steps so the panel and the
+   *   worker watchdog see we are alive.
    */
-  async function extractCommentsWithRetry(onStatus) {
-    const started = Date.now();
-    let attempt = 0;
+  async function deepLoadComments(onStatus) {
+    let lastVisible = 0;
+    let stagnant = 0;
+    let poolSize = 0;
 
-    while (Date.now() - started < COMMENTS_WAIT_MS) {
-      attempt += 1;
-      await loadVisibleCommentsPool();
-      const pool = scrapeCommentsPool(COMMENTS_POOL_MAX);
-      const selected = selectTopComments(pool, COMMENTS_FINAL_MAX);
+    for (let iter = 0; iter < COMMENTS_DEEP_MAX_ITER; iter += 1) {
+      const visible = document.querySelectorAll(
+        "ytd-comment-thread-renderer",
+      ).length;
 
-      cgLog(`comments attempt ${attempt}:`, { pool: pool.length, selected: selected.length });
+      // Re-evaluate the deduped pool size periodically; doing it every
+      // iteration is fine because pool scraping is O(threads).
+      const pool = scrapeCommentsPool(0);
+      poolSize = pool.length;
 
-      if (selected.length > 0) {
-        return { comments: selected, attempt, lazyLoaded: attempt > 1 };
+      cgLog("comments_deep_iter", {
+        iter,
+        visible,
+        pool: poolSize,
+        stagnant,
+      });
+
+      if (iter === 0 || iter % COMMENTS_PROGRESS_EVERY === 0) {
+        onStatus?.(
+          `Scrolling comments… ${poolSize}/${COMMENTS_DEEP_TARGET} loaded (iter ${iter + 1})`,
+        );
       }
 
-      const threads = document.querySelectorAll("ytd-comment-thread-renderer").length;
-      if (threads > 0 && pool.length === 0) {
-        onStatus?.(
-          `Waiting for comment text… (${Math.round((Date.now() - started) / 1000)}s)`
-        );
-      } else if (threads === 0) {
-        onStatus?.(
-          `Waiting for comment threads… (${Math.round((Date.now() - started) / 1000)}s)`
-        );
-      } else if (attempt > 1) {
-        onStatus?.(`Retrying comments extraction… (${attempt})`);
+      if (poolSize >= COMMENTS_DEEP_TARGET) {
+        cgLog("comments_deep_done_target", { iter, pool: poolSize });
+        break;
+      }
+
+      if (visible === lastVisible) {
+        stagnant += 1;
+        if (stagnant >= COMMENTS_DEEP_STAGNANT_LIMIT) {
+          cgLog("comments_deep_done_stagnant", {
+            iter,
+            pool: poolSize,
+            visible,
+          });
+          break;
+        }
+      } else {
+        stagnant = 0;
+        lastVisible = visible;
       }
 
       await scrollCommentsStep();
-      await sleep(COMMENTS_POLL_MS);
+      // Random human-like pause between scrolls.
+      await sleep(
+        randomBetween(COMMENTS_DEEP_SCROLL_MIN_MS, COMMENTS_DEEP_SCROLL_MAX_MS),
+      );
+      // Tiny settle jitter so we don't catch the DOM mid-render.
+      await sleep(
+        randomBetween(COMMENTS_DEEP_SETTLE_MIN_MS, COMMENTS_DEEP_SETTLE_MAX_MS),
+      );
     }
 
-    const pool = scrapeCommentsPool(COMMENTS_POOL_MAX);
+    return { pool: scrapeCommentsPool(0), iterations: lastVisible };
+  }
+
+  /**
+   * Main entry — deep-load → rank → top N.
+   *
+   * Returned object preserves the legacy shape so call sites and worker status
+   * text format ("X top comments (by likes) extracted") keep working.
+   */
+  async function extractCommentsWithRetry(onStatus) {
+    const { pool } = await deepLoadComments(onStatus);
+    const ranked = rankComments(pool, COMMENTS_TOP_N);
     return {
-      comments: selectTopComments(pool, COMMENTS_FINAL_MAX),
-      attempt: attempt + 1,
-      lazyLoaded: attempt > 0,
+      comments: ranked,
+      attempt: 1,
+      lazyLoaded: pool.length > COMMENTS_TOP_N,
+      poolSize: pool.length,
     };
   }
 
-  /** Gradual scroll to load more threads; bounded time/steps. */
+  /**
+   * Backward-compatible shim — the previous flow called this before extract.
+   * deepLoadComments now does the scrolling, but a couple of callers still
+   * invoke loadVisibleCommentsPool() expecting a no-op.
+   */
   async function loadVisibleCommentsPool() {
-    const budgetStart = Date.now();
-    let lastCount = 0;
-    let stagnant = 0;
-
-    for (let step = 0; step < COMMENTS_SCROLL_STEPS; step++) {
-      if (Date.now() - budgetStart > COMMENTS_LOAD_BUDGET_MS) break;
-
-      const count = document.querySelectorAll("ytd-comment-thread-renderer").length;
-      cgLog("comments_visible_loaded", { step, threads: count });
-
-      if (count >= COMMENTS_POOL_MAX) break;
-      if (count === lastCount) {
-        stagnant += 1;
-        if (stagnant >= 2) break;
-      } else {
-        stagnant = 0;
-        lastCount = count;
-      }
-
-      await scrollCommentsStep();
-      await sleep(COMMENTS_SCROLL_PAUSE_MS);
-    }
+    // Intentional no-op — deep loader handles its own scrolling.
   }
 
   function getPageMeta() {
@@ -1372,29 +1518,32 @@
   async function handleExtractComments() {
     setStatus("comments", "Scrolling to comments…");
     setMeta();
-    let commentsLazyLoaded = false;
+    let poolSize = 0;
     try {
       await scrollToComments();
       setStatus("comments", "Sorting Top comments…");
       await ensureCommentsTopSort();
       setStatus("comments", "Loading comment threads…");
 
-      const { comments, attempt, lazyLoaded } = await extractCommentsWithRetry((msg) =>
-        setStatus("comments", msg)
+      const result = await extractCommentsWithRetry((msg) =>
+        setStatus("comments", msg),
       );
-      commentsData = comments;
-      commentsLazyLoaded = lazyLoaded;
+      commentsData = result.comments;
+      poolSize = result.poolSize || commentsData.length;
       cgLog("comments_final_selected", {
-        attempt,
-        lazyLoaded,
+        pool: poolSize,
         final: commentsData.length,
-        topLikes: commentsData[0]?.likes ?? 0,
+        topScore: commentsData[0] ? commentScore(commentsData[0]) : 0,
+        topLikes: commentsData[0]?.likes_count ?? commentsData[0]?.likes ?? 0,
+        pinnedCount: commentsData.filter((c) => c.is_pinned).length,
+        heartedCount: commentsData.filter((c) => c.is_hearted).length,
       });
     } catch (err) {
       console.warn("[ContentGraph] comments extract degraded", err);
       try {
-        const pool = scrapeCommentsPool(COMMENTS_POOL_MAX);
-        commentsData = selectTopComments(pool, COMMENTS_FINAL_MAX);
+        const pool = scrapeCommentsPool(0);
+        commentsData = rankComments(pool, COMMENTS_TOP_N);
+        poolSize = pool.length;
       } catch (err2) {
         console.warn("[ContentGraph] comments extract fallback failed", err2);
         commentsData = [];
@@ -1415,13 +1564,19 @@
     }
 
     preview.value = commentsData
-      .map((c, i) => `${i + 1}. [${c.likes}] ${c.author}: ${c.text.slice(0, 120)}`)
+      .map((c, i) => {
+        const tags = [];
+        if (c.is_pinned) tags.push("PIN");
+        if (c.is_hearted) tags.push("♥");
+        const tagLabel = tags.length ? ` [${tags.join(" ")}]` : "";
+        return `${i + 1}. [${c.likes_count ?? c.likes ?? 0}👍 ${c.reply_count ?? 0}↩]${tagLabel} ${c.author}: ${c.text.slice(0, 120)}`;
+      })
       .join("\n");
     enableCommentActions(true);
-    const lazyNote = commentsLazyLoaded ? " (lazy-loaded)" : "";
+    // Keep "top comments" substring intact — worker's waitStatusOk matches it.
     setStatus(
       "comments",
-      `${commentsData.length} top comments (by likes) extracted${lazyNote}`,
+      `${commentsData.length} top comments (by likes, ranked) extracted from ${poolSize} loaded`,
       "ok"
     );
   }

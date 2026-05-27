@@ -112,8 +112,12 @@ class CommentsService:
         await self._db.commit()
         return total
 
-    async def list_for_video(self, video_id: int, limit: int = 30) -> list[Comment]:
-        """Top comments by likes for a video."""
+    async def list_for_video(self, video_id: int, limit: int = 60) -> list[Comment]:
+        """Top comments by likes for a video.
+
+        Default 60 lets `_aggregate` work with the full v0.2.9+ payload (50 saved)
+        plus headroom for older 20-row videos still in the DB.
+        """
         stmt = (
             select(Comment)
             .where(Comment.video_id == video_id)

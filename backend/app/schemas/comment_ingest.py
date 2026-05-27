@@ -47,7 +47,9 @@ class CommentsIngestRequest(BaseModel):
     video_url: str = Field(..., min_length=10, max_length=512)
     title: str = Field(..., min_length=1, max_length=2000)
     creator: str = Field(..., min_length=1, max_length=255)
-    comments: list[CommentIngestItem] = Field(..., min_length=1, max_length=20)
+    # Cap at 50 — extension v0.2.9+ deep-collects ~400 comments and ships the
+    # top-ranked 50. Older clients still send ≤ 20 and pass validation.
+    comments: list[CommentIngestItem] = Field(..., min_length=1, max_length=50)
 
 
 class CommentsIngestResponse(BaseModel):

@@ -64,7 +64,7 @@ class CommentsIngestService:
                     "is_hearted": bool(item.is_hearted),
                 }
             )
-            if len(cleaned) >= 20:
+            if len(cleaned) >= 50:
                 break
 
         if not cleaned:

@@ -98,7 +98,7 @@ async def get_video_intelligence(
 @router.get("/{video_id}/comments", response_model=list[CommentRead])
 async def list_video_comments(
     video_id: int,
-    limit: int = Query(20, ge=1, le=50),
+    limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ) -> list[CommentRead]:
     """Top stored comments for a video, sorted by likes (extension or API ingest)."""
@@ -114,7 +114,11 @@ async def list_video_comments(
             comment_text=r.comment_text,
             author_name=r.author_name or "",
             likes_count=r.likes_count or 0,
+            reply_count=getattr(r, "reply_count", 0) or 0,
             published_at=r.published_at,
+            published_text=getattr(r, "published_text", None),
+            is_pinned=bool(getattr(r, "is_pinned", False)),
+            is_hearted=bool(getattr(r, "is_hearted", False)),
             sentiment=r.sentiment or "neutral",
             emotional_tags=list(r.emotional_tags or []),
         )

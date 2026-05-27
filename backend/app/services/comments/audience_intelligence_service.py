@@ -76,6 +76,8 @@ class AudienceIntelligenceService:
 
     def _aggregate(self, rows: list[Comment]) -> CommentsIntelligence:
         """Deterministic audience metrics from stored comments."""
+        # Surface every structured metadata field so the frontend can render
+        # pinned / hearted / reply badges. Pre-v0.2.8 rows safely default to 0/false.
         top = [
             CommentRead(
                 id=r.id,
@@ -83,11 +85,15 @@ class AudienceIntelligenceService:
                 comment_text=r.comment_text,
                 author_name=r.author_name or "",
                 likes_count=r.likes_count or 0,
+                reply_count=getattr(r, "reply_count", 0) or 0,
                 published_at=r.published_at,
+                published_text=getattr(r, "published_text", None),
+                is_pinned=bool(getattr(r, "is_pinned", False)),
+                is_hearted=bool(getattr(r, "is_hearted", False)),
                 sentiment=r.sentiment or "neutral",
                 emotional_tags=list(r.emotional_tags or []),
             )
-            for r in rows[:25]
+            for r in rows[:50]
         ]
 
         sentiments = Counter(r.sentiment or "neutral" for r in rows)
