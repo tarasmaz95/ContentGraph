@@ -59,6 +59,11 @@ class Comment(Base):
     is_hearted: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    # Persisted composite ranking — set on every insert via compute_comment_score.
+    # Indexed (video_id, comment_score DESC) for fast top-N audience queries.
+    comment_score: Mapped[int] = mapped_column(
+        BigInteger, default=0, server_default="0", nullable=False, index=False
+    )
     sentiment: Mapped[str] = mapped_column(String(32), default="neutral", index=True)
     emotional_tags: Mapped[list] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime] = mapped_column(

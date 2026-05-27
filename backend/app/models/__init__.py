@@ -1,4 +1,5 @@
 from app.models.app_settings import AppSettings
+from app.models.audience_insight import AudienceInsight
 from app.models.comment import Comment
 from app.models.creator_stats_history import CreatorStatsHistory
 from app.models.creator_profile import CreatorProfile
@@ -21,6 +22,7 @@ from app.models.video_stats_history import VideoStatsHistory
 
 __all__ = [
     "AppSettings",
+    "AudienceInsight",
     "Video",
     "Comment",
     "CreatorStatsHistory",

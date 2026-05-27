@@ -86,6 +86,7 @@ class AudienceIntelligenceService:
                 author_name=r.author_name or "",
                 likes_count=r.likes_count or 0,
                 reply_count=getattr(r, "reply_count", 0) or 0,
+                comment_score=getattr(r, "comment_score", 0) or 0,
                 published_at=r.published_at,
                 published_text=getattr(r, "published_text", None),
                 is_pinned=bool(getattr(r, "is_pinned", False)),

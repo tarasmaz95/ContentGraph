@@ -31,6 +31,7 @@ import type {
   HookSearchResult,
   HookWorkspace,
 } from "@/types/hooks";
+import type { AudienceInsights } from "@/types/audience-insights";
 import type { VideoIntelligence } from "@/types/video-intelligence";
 import type {
   ScriptAnalyzeRequest,
@@ -203,6 +204,18 @@ export async function fetchVideoIntelligence(
 ): Promise<VideoIntelligence> {
   const q = refresh ? "?refresh=true" : "";
   return request<VideoIntelligence>(`/videos/${id}/intelligence${q}`);
+}
+
+/**
+ * Persisted audience intelligence for a single video.
+ * Cache-first; `refresh=true` regenerates server-side.
+ */
+export async function fetchAudienceInsights(
+  id: number,
+  refresh = false,
+): Promise<AudienceInsights> {
+  const q = refresh ? "?refresh=true" : "";
+  return request<AudienceInsights>(`/videos/${id}/audience-insights${q}`);
 }
 
 export async function searchVideos(q: string): Promise<Video[]> {

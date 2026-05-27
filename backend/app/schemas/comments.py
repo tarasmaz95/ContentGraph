@@ -20,6 +20,7 @@ class CommentRead(BaseModel):
     author_name: str
     likes_count: int
     reply_count: int = 0
+    comment_score: int = 0
     published_at: datetime | None = None
     published_text: str | None = None
     is_pinned: bool = False

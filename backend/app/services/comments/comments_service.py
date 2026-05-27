@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.models.comment import Comment
 from app.models.video import Video
+from app.services.comments.scoring import compute_comment_score
 from app.services.comments.sentiment import enrich_comment
 from app.services.transcripts.transcript_service import TranscriptService
 
@@ -59,12 +60,19 @@ class CommentsService:
         saved = 0
         for item in raw_items:
             sentiment, tags = enrich_comment(item["text"])
+            reply_count = int(item.get("reply_count") or 0)
+            score = compute_comment_score(
+                likes_count=item["likes"],
+                reply_count=reply_count,
+                is_pinned=False,
+                is_hearted=False,
+            )
             row = Comment(
                 video_id=video.id,
                 comment_text=item["text"],
                 author_name=item["author"],
                 likes_count=item["likes"],
-                reply_count=int(item.get("reply_count") or 0),
+                reply_count=reply_count,
                 published_at=item["published_at"],
                 # YouTube Data API gives exact timestamp, so no relative text.
                 published_text=None,
@@ -72,6 +80,7 @@ class CommentsService:
                 # leave defaults; extension flow fills them when available.
                 is_pinned=False,
                 is_hearted=False,
+                comment_score=score,
                 sentiment=sentiment,
                 emotional_tags=tags,
             )
@@ -113,15 +122,17 @@ class CommentsService:
         return total
 
     async def list_for_video(self, video_id: int, limit: int = 60) -> list[Comment]:
-        """Top comments by likes for a video.
+        """Top comments by composite score (was: pure likes) for a video.
 
-        Default 60 lets `_aggregate` work with the full v0.2.9+ payload (50 saved)
-        plus headroom for older 20-row videos still in the DB.
+        Default 60 lets the aggregator work with the full v0.2.9+ payload
+        (50 saved) plus headroom for older 20-row videos still in the DB.
+        Sort uses `comment_score DESC` (index `ix_comments_video_score`) and
+        falls back to `likes_count` for tie-breaks.
         """
         stmt = (
             select(Comment)
             .where(Comment.video_id == video_id)
-            .order_by(Comment.likes_count.desc())
+            .order_by(Comment.comment_score.desc(), Comment.likes_count.desc())
             .limit(limit)
         )
         return list((await self._db.execute(stmt)).scalars().all())

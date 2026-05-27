@@ -6,10 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.services.settings import get_chat_llm
+from app.schemas.audience_insights import AudienceInsights
 from app.schemas.comments import CommentRead
 from app.schemas.video import CatalogStats, VideoDetail, VideoListResponse, VideoRead
 from app.schemas.video_intelligence import VideoIntelligence
 from app.models.video import Video
+from app.services.audience_insights import AudienceInsightsService
 from app.services.comments.comments_service import CommentsService
 from app.services.video_intelligence.video_intelligence_service import (
     VideoIntelligenceService,
@@ -115,6 +117,7 @@ async def list_video_comments(
             author_name=r.author_name or "",
             likes_count=r.likes_count or 0,
             reply_count=getattr(r, "reply_count", 0) or 0,
+            comment_score=getattr(r, "comment_score", 0) or 0,
             published_at=r.published_at,
             published_text=getattr(r, "published_text", None),
             is_pinned=bool(getattr(r, "is_pinned", False)),
@@ -124,6 +127,41 @@ async def list_video_comments(
         )
         for r in rows
     ]
+
+
+@router.get(
+    "/{video_id}/audience-insights",
+    response_model=AudienceInsights,
+)
+async def get_audience_insights(
+    video_id: int,
+    refresh: bool = Query(
+        False,
+        description=(
+            "Regenerate insight (runs deterministic + optional LLM pass). "
+            "Default serves the persisted cache row."
+        ),
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> AudienceInsights:
+    """Audience Intelligence layer on top of structured comments.
+
+    Read-from-cache by default. `?refresh=true` regenerates and overwrites the
+    cached row. No background jobs.
+    """
+    video = await db.get(Video, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    settings = get_settings()
+    llm = await get_chat_llm(db, temperature=0.3) if settings.openai_api_key else None
+
+    service = AudienceInsightsService(db)
+    insights = await service.get_for_video(video_id, refresh=refresh, llm=llm)
+    # Service inserts/updates the cache row but defers commit to the caller so
+    # one HTTP request = one transaction.
+    await db.commit()
+    return insights
 
 
 @router.post("/{video_id}/comments/fetch")

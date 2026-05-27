@@ -6,6 +6,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { Loader2, RefreshCw, Film } from "lucide-react";
 
 import { SaveInsightButton } from "@/components/research/save-insight-button";
+import { AudienceIntelligenceSection } from "@/components/videos/audience-intelligence";
 import { SimilarVideos } from "@/components/videos/similar-videos";
 import { StructureAnalysis } from "@/components/videos/structure-analysis";
 import { TranscriptIntelligence } from "@/components/videos/transcript-intelligence";
@@ -152,6 +153,8 @@ export default function VideoIntelligencePage() {
         <StructureAnalysis structure={intel.structure} />
         <ViralAnalysis viral={intel.viral} />
       </div>
+
+      <AudienceIntelligenceSection videoId={intel.overview.id} />
 
       <CommentsIntelligenceSection data={intel.comments} />
 

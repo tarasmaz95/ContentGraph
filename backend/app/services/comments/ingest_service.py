@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.comment import Comment
 from app.schemas.comment_ingest import CommentsIngestRequest, CommentsIngestResponse
+from app.services.comments.scoring import compute_comment_score
 from app.services.comments.sentiment import enrich_comment
 from app.services.ingest.video_match import find_catalog_video
 from google_sheets.comments_writeback_service import SheetsCommentsWritebackService
@@ -80,6 +81,12 @@ class CommentsIngestService:
 
         for row in cleaned:
             sentiment, tags = enrich_comment(row["text"])
+            score = compute_comment_score(
+                likes_count=row["likes"],
+                reply_count=row["reply_count"],
+                is_pinned=row["is_pinned"],
+                is_hearted=row["is_hearted"],
+            )
             self._db.add(
                 Comment(
                     video_id=video.id,
@@ -91,6 +98,7 @@ class CommentsIngestService:
                     published_text=row["published_text"],
                     is_pinned=row["is_pinned"],
                     is_hearted=row["is_hearted"],
+                    comment_score=score,
                     sentiment=sentiment,
                     emotional_tags=tags,
                 )
