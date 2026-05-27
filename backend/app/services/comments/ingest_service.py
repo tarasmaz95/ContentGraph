@@ -38,10 +38,16 @@ class CommentsIngestService:
                 sheets_writeback="skipped",
             )
 
-        # Normalize, dedupe by text, sort by likes desc, cap at 20
+        # Normalize, dedupe by text, sort by structured likes_count desc, cap at 20.
+        # `likes_count` is the canonical value; legacy clients populate it via the
+        # `likes` alias in CommentIngestItem (see schema model_validator).
         seen: set[str] = set()
         cleaned: list[dict] = []
-        for item in sorted(payload.comments, key=lambda c: c.likes, reverse=True):
+        for item in sorted(
+            payload.comments,
+            key=lambda c: max(c.likes_count, c.likes),
+            reverse=True,
+        ):
             text = " ".join(item.text.split()).strip()
             if len(text) < 2 or text.lower() in seen:
                 continue
@@ -50,7 +56,12 @@ class CommentsIngestService:
                 {
                     "text": text,
                     "author": (item.author or "").strip()[:255],
-                    "likes": int(item.likes or 0),
+                    "likes": int(max(item.likes_count, item.likes) or 0),
+                    "reply_count": int(item.reply_count or 0),
+                    "published_at": item.published_at,
+                    "published_text": (item.published_text or "").strip()[:64] or None,
+                    "is_pinned": bool(item.is_pinned),
+                    "is_hearted": bool(item.is_hearted),
                 }
             )
             if len(cleaned) >= 20:
@@ -75,7 +86,11 @@ class CommentsIngestService:
                     comment_text=row["text"],
                     author_name=row["author"],
                     likes_count=row["likes"],
-                    published_at=None,
+                    reply_count=row["reply_count"],
+                    published_at=row["published_at"],
+                    published_text=row["published_text"],
+                    is_pinned=row["is_pinned"],
+                    is_hearted=row["is_hearted"],
                     sentiment=sentiment,
                     emotional_tags=tags,
                 )

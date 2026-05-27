@@ -1030,6 +1030,46 @@
     }
   }
 
+  function parseReplyCountFromThread(thread) {
+    // YouTube shows "Показати N відповідей" / "View N replies" inside the
+    // ytd-comment-replies-renderer button. Number is best-effort — when no
+    // replies are present, the renderer is missing and we return 0.
+    const repliesRoot =
+      thread.querySelector("ytd-comment-replies-renderer #more-replies") ||
+      thread.querySelector("ytd-comment-replies-renderer button") ||
+      thread.querySelector("#more-replies button") ||
+      thread.querySelector("#replies #more-replies");
+    const repliesText = normalizeText(repliesRoot?.textContent || "");
+    if (!repliesText) return 0;
+    const m = repliesText.match(/([\d.,]+)\s*([km])?/i);
+    if (!m) return 0;
+    return parseLikeCount(`${m[1]}${m[2] || ""}`);
+  }
+
+  function detectPinned(thread) {
+    return Boolean(
+      thread.querySelector("ytd-pinned-comment-badge-renderer") ||
+        thread.querySelector("#pinned-comment-badge") ||
+        thread.querySelector('[aria-label*="Pinned" i]')
+    );
+  }
+
+  function detectHearted(thread) {
+    return Boolean(
+      thread.querySelector("ytd-creator-heart") ||
+        thread.querySelector("#creator-heart") ||
+        thread.querySelector('[aria-label*="hearted" i]')
+    );
+  }
+
+  function readPublishedText(thread) {
+    const el =
+      thread.querySelector("#published-time-text a") ||
+      thread.querySelector("#published-time-text") ||
+      thread.querySelector("yt-formatted-string.published-time-text");
+    return normalizeText(el?.textContent || "");
+  }
+
   function scrapeCommentFromThread(thread) {
     const authorEl =
       thread.querySelector("#author-text span") ||
@@ -1049,7 +1089,17 @@
 
     if (text.length < 2) return null;
     if (/^(subscribe|liked|view all|show more)/i.test(text)) return null;
-    return { author, text, likes };
+
+    return {
+      author,
+      text,
+      likes,
+      likes_count: likes,
+      reply_count: parseReplyCountFromThread(thread),
+      published_text: readPublishedText(thread).slice(0, 64) || null,
+      is_pinned: detectPinned(thread),
+      is_hearted: detectHearted(thread),
+    };
   }
 
   /** Collect up to maxItems unique threads from current DOM (no final cap). */

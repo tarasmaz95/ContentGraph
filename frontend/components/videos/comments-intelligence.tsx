@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { MessageCircle, ThumbsUp } from "lucide-react";
+import { Heart, MessageCircle, Pin, Reply, ThumbsUp } from "lucide-react";
 
 import { CommentChartsPanel } from "@/components/videos/comment-charts";
 import type { CommentRead, CommentsIntelligence } from "@/types/video-intelligence";
@@ -128,6 +128,23 @@ export function CommentsIntelligenceSection({ data }: CommentsIntelligenceProps)
               >
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   <span className="font-medium">{c.author_name || "Anonymous"}</span>
+                  {c.is_pinned && (
+                    <span
+                      className="flex items-center gap-1 rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-800"
+                      title="Pinned by creator"
+                    >
+                      <Pin className="h-3 w-3" />
+                      Pinned
+                    </span>
+                  )}
+                  {c.is_hearted && (
+                    <span
+                      className="flex items-center gap-1 rounded bg-pink-100 px-1.5 py-0.5 text-xs font-medium text-pink-800"
+                      title="Hearted by creator"
+                    >
+                      <Heart className="h-3 w-3" />
+                    </span>
+                  )}
                   <span
                     className={`rounded px-2 py-0.5 text-xs font-medium ${
                       SENTIMENT_CLASS[c.sentiment] ?? "bg-muted"
@@ -143,9 +160,23 @@ export function CommentsIntelligenceSection({ data }: CommentsIntelligenceProps)
                       {tag}
                     </span>
                   ))}
-                  <span className="ml-auto flex items-center gap-1 text-muted-foreground">
-                    <ThumbsUp className="h-3 w-3" />
-                    {c.likes_count.toLocaleString()}
+                  {c.published_text && (
+                    <span className="text-xs text-muted-foreground">{c.published_text}</span>
+                  )}
+                  <span className="ml-auto flex items-center gap-3 text-muted-foreground">
+                    {(c.reply_count ?? 0) > 0 && (
+                      <span
+                        className="flex items-center gap-1"
+                        title={`${c.reply_count} replies`}
+                      >
+                        <Reply className="h-3 w-3" />
+                        {(c.reply_count ?? 0).toLocaleString()}
+                      </span>
+                    )}
+                    <span className="flex items-center gap-1">
+                      <ThumbsUp className="h-3 w-3" />
+                      {c.likes_count.toLocaleString()}
+                    </span>
                   </span>
                 </div>
                 <p className="text-foreground/90">{c.comment_text}</p>

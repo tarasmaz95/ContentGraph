@@ -59,3 +59,51 @@ def test_comments_ingest_no_match(api_v1: httpx.Client) -> None:
     assert body["matched"] is False
     assert body["comments_saved"] == 0
     assert body.get("sheets_writeback") == "skipped"
+
+
+def test_comments_ingest_accepts_structured_v028_payload(api_v1: httpx.Client) -> None:
+    """v0.2.8+ extensions send full structured metadata; schema must accept it."""
+    response = api_v1.post(
+        "/comments/ingest",
+        json={
+            "video_url": "https://www.youtube.com/watch?v=zzzzzzzzzzz",
+            "title": "__nonexistent_title_xyz__",
+            "creator": "__nonexistent_creator_xyz__",
+            "comments": [
+                {
+                    "author": "Creator",
+                    "text": "Top pinned comment with full metadata",
+                    "likes_count": 532,
+                    "reply_count": 14,
+                    "published_text": "2 days ago",
+                    "is_pinned": True,
+                    "is_hearted": True,
+                },
+                {
+                    "author": "Fan",
+                    "text": "Reply-rich follow-up",
+                    "likes_count": 88,
+                    "reply_count": 3,
+                },
+            ],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    # No matching catalog video — that's fine; we only verify the schema path.
+    assert body["matched"] is False
+
+
+def test_comments_ingest_legacy_v027_payload_still_works(api_v1: httpx.Client) -> None:
+    """Legacy clients (v0.2.6 / v0.2.7) send only {author, text, likes} — keep working."""
+    response = api_v1.post(
+        "/comments/ingest",
+        json={
+            "video_url": "https://www.youtube.com/watch?v=zzzzzzzzzzz",
+            "title": "__nonexistent_title_xyz__",
+            "creator": "__nonexistent_creator_xyz__",
+            "comments": [{"author": "Old", "text": "legacy shape", "likes": 7}],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["matched"] is False

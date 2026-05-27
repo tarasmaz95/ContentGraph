@@ -8,14 +8,22 @@ from app.schemas.common import ChartPoint
 
 
 class CommentRead(BaseModel):
-    """One stored YouTube comment."""
+    """One stored YouTube comment.
+
+    Structured fields are the source of truth. `derived_plain_text` is built on
+    read for legacy consumers that expect "Author (N likes): text" lines.
+    """
 
     id: int
     video_id: int
     comment_text: str
     author_name: str
     likes_count: int
+    reply_count: int = 0
     published_at: datetime | None = None
+    published_text: str | None = None
+    is_pinned: bool = False
+    is_hearted: bool = False
     sentiment: str
     emotional_tags: list[str] = Field(default_factory=list)
 

@@ -54,7 +54,7 @@ export const config = {
   cooldownMinutes: num("BROWSER_INGESTION_COOLDOWN_MINUTES", 30),
   restartBrowserEveryJobs: num("RESTART_BROWSER_EVERY_JOBS", 20),
   requiredExtensionVersion: (
-    process.env.REQUIRED_EXTENSION_VERSION || "0.2.7"
+    process.env.REQUIRED_EXTENSION_VERSION || "0.2.8"
   ).trim(),
   phaseRetries: num("PHASE_RETRIES", 2),
 };

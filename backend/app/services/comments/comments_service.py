@@ -64,7 +64,14 @@ class CommentsService:
                 comment_text=item["text"],
                 author_name=item["author"],
                 likes_count=item["likes"],
+                reply_count=int(item.get("reply_count") or 0),
                 published_at=item["published_at"],
+                # YouTube Data API gives exact timestamp, so no relative text.
+                published_text=None,
+                # Data API doesn't expose pinned/hearted on the snippet endpoint —
+                # leave defaults; extension flow fills them when available.
+                is_pinned=False,
+                is_hearted=False,
                 sentiment=sentiment,
                 emotional_tags=tags,
             )
@@ -161,9 +168,8 @@ class CommentsService:
 
         items: list[dict] = []
         for thread in response.get("items", []):
-            snippet = thread.get("snippet", {}).get("topLevelComment", {}).get(
-                "snippet", {}
-            )
+            thread_snippet = thread.get("snippet", {}) or {}
+            snippet = thread_snippet.get("topLevelComment", {}).get("snippet", {}) or {}
             text = (snippet.get("textDisplay") or snippet.get("textOriginal") or "").strip()
             if not text or len(text) < 3:
                 continue
@@ -178,6 +184,7 @@ class CommentsService:
                     "text": text[:4000],
                     "author": snippet.get("authorDisplayName", "")[:255],
                     "likes": int(snippet.get("likeCount", 0)),
+                    "reply_count": int(thread_snippet.get("totalReplyCount", 0) or 0),
                     "published_at": published,
                 }
             )

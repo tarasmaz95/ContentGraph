@@ -1,9 +1,9 @@
 {
-  "version": "0.2.7",
-  "extensionVersion": "0.2.7",
-  "workerVersion": "0.2.7",
+  "version": "0.2.8",
+  "extensionVersion": "0.2.8",
+  "workerVersion": "0.2.8",
   "name": "ContentGraph Browser Worker",
-  "updatedAt": "2026-05-27T07:43:41Z",
-  "sizeBytes": 39816,
+  "updatedAt": "2026-05-27T08:58:55Z",
+  "sizeBytes": 40354,
   "filename": "contentgraph-browser-worker.zip"
 }

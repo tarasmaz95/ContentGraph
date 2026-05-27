@@ -95,7 +95,11 @@ export interface CommentRead {
   comment_text: string;
   author_name: string;
   likes_count: number;
+  reply_count?: number;
   published_at?: string | null;
+  published_text?: string | null;
+  is_pinned?: boolean;
+  is_hearted?: boolean;
   sentiment: string;
   emotional_tags: string[];
 }
